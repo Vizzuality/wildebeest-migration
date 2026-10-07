@@ -8,7 +8,7 @@ import { Border, Labels } from './Overlays'
 import { Rivers } from './Rivers'
 import { HORIZON, Sky } from './Sky'
 import { Terrain } from './Terrain'
-import { Trees } from './Trees'
+import { Groves } from './Groves'
 
 function Clock() {
   useFrame((_, dt) => {
@@ -34,7 +34,7 @@ export function Scene() {
       <Sky />
       <Terrain />
       <Rivers />
-      <Trees />
+      <Groves />
       <Border />
       <Labels />
       <CameraRig />

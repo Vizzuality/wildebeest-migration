@@ -1,21 +1,24 @@
 import { useMemo } from 'react'
 import * as THREE from 'three'
-import { LAT0, LON0, MAP, project } from '../geo'
+import { MAP, project } from '../geo'
 import { GLSL_COMMON, shared } from '../shaders/common'
 import { useHeightfield, type Heightfield } from '../terrain'
 import { HORIZON } from './Sky'
 
 const vertex = /* glsl */ `
 ${GLSL_COMMON}
-attribute vec3 aMask;
+attribute vec4 aCover;
+attribute vec2 aMask;
 varying vec3 vWorld;
 varying vec3 vNormal;
-varying vec3 vMask;
+varying vec4 vCover;
+varying vec2 vMask;
 #include <fog_pars_vertex>
 void main() {
   vec4 world = modelMatrix * vec4(position, 1.0);
   vWorld = world.xyz;
   vNormal = normal;
+  vCover = aCover;
   vMask = aMask;
   vec4 mvPosition = viewMatrix * world;
   gl_Position = projectionMatrix * mvPosition;
@@ -30,72 +33,78 @@ uniform vec2 uCraterLake;
 uniform vec2 uMapMax;
 varying vec3 vWorld;
 varying vec3 vNormal;
-varying vec3 vMask;
+varying vec4 vCover;
+varying vec2 vMask;
 #include <fog_pars_fragment>
 
-float gridLine(float v, float spacing) {
-  float d = abs(fract(v / spacing + 0.5) - 0.5) * spacing;
-  float w = fwidth(v) * 1.2;
-  return 1.0 - smoothstep(0.0, w, d);
+// Tree crowns as a mask whose area matches the Cobertura's tree share. Each scale of clumping
+// fades out once it is smaller than a pixel, so far away it settles on the plain average.
+float canopy(vec2 xz, float tree, float fw) {
+  float clumps = 1.0 - smoothstep(0.03, 0.12, fw);
+  float crowns = 1.0 - smoothstep(0.008, 0.03, fw);
+  float n = snoise(xz * 4.0) * clumps * 0.6 + snoise(xz * 14.0) * crowns * 0.4;
+  float u = 0.5 + 0.5 * n / max(clumps * 0.6 + crowns * 0.4, 1e-3);
+  float sharp = smoothstep(1.0 - tree - 0.12, 1.0 - tree + 0.12, u);
+  return mix(tree, sharp, max(clumps, crowns));
 }
 
 void main() {
   vec3 N = normalize(vNormal);
   vec2 xz = vWorld.xz;
-  float wood = clamp(vMask.x, 0.0, 1.0);
-  float riverD = vMask.y;
-  float lake = vMask.z;
+  float tree = clamp(vCover.x, 0.0, 1.0);
+  float shrub = clamp(vCover.y, 0.0, 1.0);
+  float wet = clamp(vCover.z, 0.0, 1.0);
+  float bare = clamp(vCover.w, 0.0, 1.0);
+  float grass = max(0.0, 1.0 - tree - shrub - wet - bare);
+  float lake = vMask.y;
+  float fw = length(fwidth(xz));
 
   float n1 = snoise(xz * 0.08);
   float n2 = snoise(xz * 0.35 + 3.0);
-  float g = clamp(greenness(xz.y, uMonth) * (0.82 + 0.25 * n1) + 0.2 * wood, 0.0, 1.0);
+  float n3 = snoise(xz * 2.2 - 7.0) * (1.0 - smoothstep(0.05, 0.2, fw));
+  float g = clamp(greenness(xz.y, uMonth) * (0.9 + 0.15 * n1), 0.0, 1.0);
 
-  vec3 straw = srgb(vec3(0.80, 0.66, 0.40));
-  vec3 strawDark = srgb(vec3(0.62, 0.47, 0.27));
-  vec3 grass = srgb(vec3(0.52, 0.60, 0.27));
-  vec3 lush = srgb(vec3(0.30, 0.44, 0.17));
-  vec3 olive = srgb(vec3(0.33, 0.36, 0.17));
-  vec3 rock = srgb(vec3(0.46, 0.40, 0.34));
+  // Hierba swings hardest with the rain: straw in the dry season, fresh green in the rains.
+  vec3 straw = mix(srgb(vec3(0.78, 0.65, 0.42)), srgb(vec3(0.66, 0.53, 0.33)), 0.4 + 0.25 * n2);
+  vec3 fresh = mix(srgb(vec3(0.48, 0.54, 0.28)), srgb(vec3(0.38, 0.47, 0.21)), 0.4 + 0.25 * n2);
+  vec3 grassCol = mix(straw, fresh, g) * (0.96 + 0.05 * n3);
+  // Matorral only half follows it: grey-brown Commiphora thorn at worst, dull olive at best.
+  vec3 shrubCol = mix(srgb(vec3(0.50, 0.43, 0.31)), srgb(vec3(0.36, 0.41, 0.21)), g * 0.7) * (0.92 + 0.1 * n3);
+  vec3 wetCol = mix(srgb(vec3(0.36, 0.42, 0.20)), srgb(vec3(0.22, 0.40, 0.17)), 0.4 + 0.6 * g);
+  vec3 bareCol = srgb(vec3(0.72, 0.66, 0.56));
+  float under = max(1.0 - tree, 1e-3);
+  vec3 floorCol = (grassCol * grass + shrubCol * shrub + wetCol * wet + bareCol * bare) / under;
+  if (grass + shrub + wet + bare < 1e-3) floorCol = grassCol;
 
-  vec3 dry = mix(straw, strawDark, 0.5 + 0.5 * n2);
-  vec3 green = mix(grass, lush, clamp(wood + 0.3 * n2, 0.0, 1.0));
-  vec3 col = mix(dry, green, g);
-  col = mix(col, mix(olive, lush, g), wood * 0.55 * (0.6 + 0.4 * n2));
+  // Dense canopy (galería, highland forest) stays evergreen; open acacia yellows a little when dry.
+  float dense = smoothstep(0.35, 0.8, tree);
+  vec3 acacia = mix(srgb(vec3(0.44, 0.42, 0.22)), srgb(vec3(0.26, 0.34, 0.13)), 0.35 + 0.65 * g);
+  vec3 forest = srgb(vec3(0.13, 0.24, 0.10));
+  vec3 treeCol = mix(acacia, forest, dense) * (0.8 + 0.3 * (0.5 + 0.5 * snoise(xz * 11.0 + 5.0)));
+
+  // Crowns, plus the shadow each one throws away from the sun.
+  float c = canopy(xz, tree, fw);
+  float shaded = canopy(xz + uSunDir.xz * 0.035, tree, fw);
+  vec3 col = mix(floorCol, treeCol, c);
+  col *= 1.0 - 0.4 * shaded * (1.0 - c);
 
   // Bare rock on steep slopes and high ground.
+  vec3 rock = srgb(vec3(0.46, 0.40, 0.34));
   float steep = smoothstep(0.86, 0.62, N.y);
   col = mix(col, rock, steep * 0.8);
 
   // Ngorongoro crater floor and Lake Magadi, its soda lake.
   float dC = distance(xz, uCrater);
-  col = mix(col, mix(grass, lush, 0.4), smoothstep(9.0, 7.0, dC) * 0.7);
+  col = mix(col, fresh, smoothstep(9.0, 7.0, dC) * 0.4);
   col = mix(col, srgb(vec3(0.86, 0.80, 0.78)), smoothstep(2.0, 1.5, distance(xz, uCraterLake)));
 
-  // Riparian (gallery) forest along the rivers.
-  col = mix(col, srgb(vec3(0.16, 0.30, 0.12)), (1.0 - smoothstep(0.8, 2.6, riverD)) * 0.85);
-
-  // Lake Victoria.
+  // Lakes.
   float shimmer = 0.5 + 0.5 * snoise(xz * 0.15 + vec2(uClock * 0.05, uClock * 0.03));
   vec3 water = mix(srgb(vec3(0.07, 0.20, 0.27)), srgb(vec3(0.16, 0.36, 0.42)), shimmer * 0.6);
   col = mix(col, water, smoothstep(0.4, 0.9, lake));
 
-  // Drifting cloud shadows where it is raining this month.
-  float rainy = smoothstep(30.0, 120.0, rainAt(xz.y, uMonth));
-  float cloud = smoothstep(0.25, 0.75, snoise(xz * 0.012 + vec2(uClock * 0.012, uClock * 0.005)) * 0.7 + 0.3 * snoise(xz * 0.04 - uClock * 0.01));
-  float shadow = cloud * rainy * 0.45;
-
-  // Lighting: warm low sun, cool sky fill.
-  float diff = max(dot(N, uSunDir), 0.0);
-  vec3 sun = srgb(vec3(1.0, 0.86, 0.66)) * 1.55;
-  vec3 sky = mix(srgb(vec3(0.45, 0.42, 0.40)), srgb(vec3(0.55, 0.62, 0.75)), N.y * 0.5 + 0.5) * 0.55;
-  vec3 lit = col * (sky + sun * diff * (1.0 - shadow));
+  vec3 lit = sunlight(col, N, cloudShadow(xz));
   lit += water * lake * pow(max(dot(reflect(-uSunDir, N), vec3(0.0, 1.0, 0.0)), 0.0), 8.0) * 0.08;
-
-  // Graticule every half degree.
-  float lon = vWorld.x / 111.0 + ${LON0.toFixed(2)};
-  float lat = -vWorld.z / 111.0 + ${LAT0.toFixed(2)};
-  float grid = max(gridLine(lon, 0.5), gridLine(lat, 0.5));
-  lit = mix(lit, vec3(1.0, 0.95, 0.85), grid * 0.12);
 
   vec2 edge = min(xz - uMapMin, uMapMax - xz);
   float fade = 1.0 - smoothstep(0.0, 22.0, min(edge.x, edge.y));
@@ -112,7 +121,7 @@ void main() {
 const CRATER = project([35.575, -3.18])
 const CRATER_LAKE = project([35.536, -3.193])
 
-function buildGeometry({ nx, nz, step, heights, masks }: Heightfield) {
+function buildGeometry({ nx, nz, step, heights, cover, masks }: Heightfield) {
   const pos = new Float32Array(nx * nz * 3)
   for (let iz = 0; iz < nz; iz++) {
     for (let ix = 0; ix < nx; ix++) {
@@ -136,7 +145,8 @@ function buildGeometry({ nx, nz, step, heights, masks }: Heightfield) {
   }
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
-  geo.setAttribute('aMask', new THREE.BufferAttribute(masks, 3))
+  geo.setAttribute('aCover', new THREE.BufferAttribute(cover, 4))
+  geo.setAttribute('aMask', new THREE.BufferAttribute(masks, 2))
   geo.setIndex(new THREE.BufferAttribute(index, 1))
   geo.computeVertexNormals()
   geo.computeBoundingSphere()

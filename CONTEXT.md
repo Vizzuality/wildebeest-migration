@@ -39,3 +39,17 @@ _Avoid_: river, cauce
 **Afluente**:
 Un río real con nombre que se muestra por contexto (Orangi, Seronera, Sand River, Talek, Olare Orok, Oldupai), con menos peso visual que un Río principal.
 _Avoid_: tributario, arroyo, stream
+
+### Vegetación
+
+**Cobertura**:
+La proporción de árbol, matorral, hierba, suelo desnudo y humedal en cada punto del Mapa, derivada exclusivamente de un mapa de cobertura real, sin manchas añadidas a mano.
+_Avoid_: woodland, máscara de bosque, landcover
+
+**Bosque de galería**:
+La franja de árboles densos que bordea los ríos. Es la Cobertura la que la define, no la distancia al cauce.
+_Avoid_: riparian, ribera
+
+**Bosquete**:
+Un grupo de árboles o matas que se dibuja con volumen sobre la Cobertura. Hay tres tipos: acacia paraguas, copa redonda y matorral bajo.
+_Avoid_: árbol, tree, instancia

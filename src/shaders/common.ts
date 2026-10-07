@@ -78,4 +78,25 @@ float snoise(vec2 v) {
   g.yz = a0.yz * x12.xz + h.yz * x12.yw;
   return 130.0 * dot(m, g);
 }
+
+// Drifting cloud shadows where it is raining this month (0 = clear, ~0.45 = under a cloud).
+float cloudShadow(vec2 xz) {
+  float rainy = smoothstep(30.0, 120.0, rainAt(xz.y, uMonth));
+  float cloud = smoothstep(0.25, 0.75, snoise(xz * 0.012 + vec2(uClock * 0.012, uClock * 0.005)) * 0.7 + 0.3 * snoise(xz * 0.04 - uClock * 0.01));
+  return cloud * rainy * 0.45;
+}
+
+// Warm low sun and cool sky fill, shared so ground and Bosquetes light the same.
+vec3 sunlight(vec3 albedo, vec3 N, float shadow) {
+  float diff = max(dot(N, uSunDir), 0.0);
+  vec3 sun = srgb(vec3(1.0, 0.86, 0.66)) * 1.55;
+  vec3 sky = mix(srgb(vec3(0.45, 0.42, 0.40)), srgb(vec3(0.55, 0.62, 0.75)), N.y * 0.5 + 0.5) * 0.55;
+  return albedo * (sky + sun * diff * (1.0 - shadow));
+}
+
+float hash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
 `

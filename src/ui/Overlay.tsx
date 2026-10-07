@@ -37,6 +37,10 @@ export function Overlay() {
           <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noreferrer">
             AWS Terrain Tiles
           </a>{' '}
+          · cobertura:{' '}
+          <a href="https://esa-worldcover.org/en/data-access" target="_blank" rel="noreferrer">
+            © ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021)
+          </a>{' '}
           · ríos:{' '}
           <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
             © OpenStreetMap contributors

@@ -1,5 +1,4 @@
 import { use } from 'react'
-import { createNoise2D } from 'simplex-noise'
 import * as THREE from 'three'
 import { MAP } from './geo'
 import { shared } from './shaders/common'
@@ -18,31 +17,6 @@ export function mulberry32(seed: number) {
 
 // Tuned by eye: enough to read the Ngorongoro highlands and the escarpments without caricature.
 export const EXAGGERATION = 2
-
-const noise = createNoise2D(mulberry32(7))
-
-function fbm(x: number, z: number, octaves = 4) {
-  let sum = 0
-  let amp = 0.5
-  let f = 1
-  for (let i = 0; i < octaves; i++) {
-    sum += amp * noise(x * f, z * f)
-    f *= 2.03
-    amp *= 0.5
-  }
-  return sum
-}
-
-function smoothstep(a: number, b: number, x: number) {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)))
-  return t * t * (3 - 2 * t)
-}
-
-export function woodland(x: number, z: number) {
-  const southPlains = smoothstep(-5, 35, z) * smoothstep(-55, -25, x) * (1 - smoothstep(55, 70, x))
-  const patches = smoothstep(-0.25, 0.45, fbm(x * 0.03 + 11, z * 0.03 - 4, 3))
-  return Math.max(0, (1 - southPlains) * patches)
-}
 
 export type RiverKind = 'main' | 'tributary'
 
@@ -68,7 +42,9 @@ export interface Heightfield {
   nz: number
   step: number
   heights: Float32Array
-  /** Per vertex: woodland density, distance to nearest river (km), lake (0/1). */
+  /** Per vertex Cobertura (0–1): árbol, matorral, humedal, suelo desnudo. Hierba is the rest. */
+  cover: Float32Array
+  /** Per vertex: distance to nearest river (km), lake (0/1). */
   masks: Float32Array
   rivers: RiverLine[]
   heightAt: (x: number, z: number) => number
@@ -81,10 +57,11 @@ async function fetchOk(url: string) {
 }
 
 async function fetchHeightfield(): Promise<Heightfield> {
-  const [meta, elevation, rawMasks] = await Promise.all([
+  const [meta, elevation, rawMasks, rawCover] = await Promise.all([
     fetchOk('/terrain/terrain.json').then((r) => r.json() as Promise<TerrainMeta>),
     fetchOk('/terrain/elevation.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/masks.bin').then((r) => r.arrayBuffer()),
+    fetchOk('/terrain/cover.bin').then((r) => r.arrayBuffer()),
   ])
   if (meta.minX !== MAP.minX || meta.minZ !== MAP.minZ) throw new Error('terrain bake does not match MAP, run pnpm bake:terrain')
 
@@ -92,17 +69,12 @@ async function fetchHeightfield(): Promise<Heightfield> {
   const dm = new Uint16Array(elevation)
   const bytes = new Uint8Array(rawMasks)
   const heights = new Float32Array(nx * nz)
-  const masks = new Float32Array(nx * nz * 3)
-  for (let iz = 0; iz < nz; iz++) {
-    const z = MAP.minZ + iz * step
-    for (let ix = 0; ix < nx; ix++) {
-      const i = iz * nx + ix
-      const river = (bytes[i * 2] / 240) * meta.riverMax
-      heights[i] = ((dm[i] / 10 - meta.base) / 1000) * EXAGGERATION
-      masks[i * 3] = woodland(MAP.minX + ix * step, z) + 0.8 * (1 - smoothstep(0.8, 3.5, river))
-      masks[i * 3 + 1] = river
-      masks[i * 3 + 2] = bytes[i * 2 + 1] / 255
-    }
+  const masks = new Float32Array(nx * nz * 2)
+  const cover = Float32Array.from(new Uint8Array(rawCover), (v) => v / 255)
+  for (let i = 0; i < nx * nz; i++) {
+    heights[i] = ((dm[i] / 10 - meta.base) / 1000) * EXAGGERATION
+    masks[i * 2] = (bytes[i * 2] / 240) * meta.riverMax
+    masks[i * 2 + 1] = bytes[i * 2 + 1] / 255
   }
 
   const tex = new THREE.DataTexture(heights, nx, nz, THREE.RedFormat, THREE.FloatType)
@@ -112,7 +84,7 @@ async function fetchHeightfield(): Promise<Heightfield> {
   shared.uHeight.value = tex
   shared.uMapStep.value = step
 
-  const hf = { nx, nz, step, heights, masks }
+  const hf = { nx, nz, step, heights, cover, masks }
   return {
     ...hf,
     rivers: meta.rivers.flatMap((r) => r.lines.map((points) => ({ name: r.name, kind: r.kind, points }))),

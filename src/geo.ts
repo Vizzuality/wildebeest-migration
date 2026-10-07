@@ -3,7 +3,7 @@
 
 export const LON0 = 34.85
 export const LAT0 = -2.3
-const KM_PER_DEG = 111
+export const KM_PER_DEG = 111
 
 // Sized so every labelled place sits clear of the Bruma at the edges.
 export const MAP = { minX: -175, maxX: 125, minZ: -181, maxZ: 152 }

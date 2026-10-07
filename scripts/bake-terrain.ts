@@ -4,12 +4,14 @@
 //
 // Elevation: AWS Terrain Tiles (Terrarium encoding), averaged onto the grid.
 // Rivers: OpenStreetMap waterways, via the Overpass API.
+// Cobertura: ESA WorldCover 10 m (2021), read as windows straight from its public COGs.
 // Downloads are cached in .cache/terrain so re-runs are offline.
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
+import { fromUrl } from 'geotiff'
 import { PNG } from 'pngjs'
-import { MAP, project, unproject } from '../src/geo.ts'
+import { KM_PER_DEG, LON0, MAP, project, unproject } from '../src/geo.ts'
 
 const STEP = 0.3
 const ZOOM = 11
@@ -45,6 +47,16 @@ const RIVERS: { name: string; kind: 'main' | 'tributary'; osm: string[] }[] = [
   { name: 'Olare Orok', kind: 'tributary', osm: ['Olare Orok'] },
   { name: 'Oldupai', kind: 'tributary', osm: ['Oldupai River'] },
 ]
+
+// WorldCover tiles are 3°×3°, named by their south-west corner. Overview 1 is ~20 m/px:
+// ~225 samples per 300 m cell, plenty for fractions, at a quarter of the download.
+const WORLDCOVER = (tile: string) =>
+  `https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_${tile}_Map.tif`
+const WORLDCOVER_TILES = ['S03E033', 'S06E033']
+const WORLDCOVER_LEVEL = 1
+/** Channels of cover.bin. Grassland, cropland and anything unlisted count as hierba. */
+const COVER: Record<number, number> = { 10: 0, 20: 1, 90: 2, 95: 2, 50: 3, 60: 3 }
+const WATER = 80
 
 const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter']
 
@@ -155,6 +167,59 @@ function resample(sample: (lon: number, lat: number) => number) {
     }
   }
   return out
+}
+
+/**
+ * Cobertura per cell: share of árbol, matorral, humedal and suelo desnudo among the
+ * WorldCover pixels whose centre falls in the cell (open water left out). Hierba is the rest.
+ */
+async function loadCover() {
+  const [west, north] = unproject(MAP.minX - STEP, MAP.minZ - STEP)
+  const [east, south] = unproject(MAP.maxX + STEP, MAP.maxZ + STEP)
+  const counts = new Uint16Array(nx * nz * 5)
+  for (const tile of WORLDCOVER_TILES) {
+    const tiff = await fromUrl(WORLDCOVER(tile))
+    const full = await tiff.getImage(0)
+    const image = await tiff.getImage(WORLDCOVER_LEVEL)
+    const [tw, , te, tn] = full.getBoundingBox()
+    const res = (te - tw) / image.getWidth()
+    const x0 = Math.max(0, Math.floor((west - tw) / res))
+    const x1 = Math.min(image.getWidth(), Math.ceil((east - tw) / res))
+    const y0 = Math.max(0, Math.floor((tn - north) / res))
+    const y1 = Math.min(image.getHeight(), Math.ceil((tn - south) / res))
+    if (x0 >= x1 || y0 >= y1) continue
+    console.log(`cobertura: ${tile}, ${x1 - x0}×${y1 - y0} px at ~${Math.round(res * 111_000)} m`)
+    const rows = image.getTileHeight()
+    for (let y = y0; y < y1; y += rows) {
+      const h = Math.min(rows, y1 - y)
+      const [band] = (await retry(() => image.readRasters({ window: [x0, y, x1, y + h] }))) as unknown as Uint8Array[]
+      const w = x1 - x0
+      for (let r = 0; r < h; r++) {
+        const lat = tn - (y + r + 0.5) * res
+        const iz = Math.round((project([LON0, lat])[1] - MAP.minZ) / STEP)
+        if (iz < 0 || iz >= nz) continue
+        for (let c = 0; c < w; c++) {
+          const ix = Math.round(((tw + (x0 + c + 0.5) * res - LON0) * KM_PER_DEG - MAP.minX) / STEP)
+          if (ix < 0 || ix >= nx) continue
+          const cls = band[r * w + c]
+          if (cls === WATER || cls === 0) continue
+          const i = (iz * nx + ix) * 5
+          counts[i + 4]++
+          const ch = COVER[cls]
+          if (ch !== undefined) counts[i + ch]++
+        }
+      }
+      process.stdout.write(`  ${Math.round(((y + h - y0) / (y1 - y0)) * 100)}%\r`)
+    }
+    console.log()
+  }
+  const cover = new Uint8Array(nx * nz * 4)
+  for (let i = 0; i < nx * nz; i++) {
+    const total = counts[i * 5 + 4]
+    if (!total) continue
+    for (let ch = 0; ch < 4; ch++) cover[i * 4 + ch] = Math.round((counts[i * 5 + ch] / total) * 255)
+  }
+  return Buffer.from(cover.buffer)
 }
 
 function lakeMask(elev: Float32Array) {
@@ -298,6 +363,7 @@ const rivers = RIVERS.map((r) => {
   return { name: r.name, kind: r.kind, lines }
 })
 const dist = riverDistance(rivers.flatMap((r) => r.lines))
+const cover = await cached(`worldcover-${WORLDCOVER_LEVEL}-${STEP}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, loadCover)
 
 // Elevation in decimetres so 1 m steps never show up as terraces on the plains.
 const dm = new Uint16Array(nx * nz)
@@ -311,6 +377,7 @@ for (let i = 0; i < nx * nz; i++) {
 
 await writeFile(`${OUT}/elevation.bin`, dm)
 await writeFile(`${OUT}/masks.bin`, masks)
+await writeFile(`${OUT}/cover.bin`, cover)
 await writeFile(
   `${OUT}/terrain.json`,
   JSON.stringify({ nx, nz, step: STEP, minX: MAP.minX, minZ: MAP.minZ, base: BASE, riverMax: RIVER_MAX, rivers }),
@@ -324,4 +391,7 @@ for (const e of elev) {
 }
 const lakeCells = lake.reduce((s, v) => s + v, 0)
 console.log(`elevation ${lo.toFixed(0)}–${hi.toFixed(0)} m, Cota base ${BASE} m, lake ${((lakeCells / lake.length) * 100).toFixed(1)}% of the Mapa`)
+const share = [0, 0, 0, 0]
+for (let i = 0; i < cover.length; i++) share[i % 4] += cover[i] / 255 / (nx * nz)
+console.log(`cobertura: árbol ${(share[0] * 100).toFixed(1)}%, matorral ${(share[1] * 100).toFixed(1)}%, humedal ${(share[2] * 100).toFixed(1)}%, desnudo ${(share[3] * 100).toFixed(1)}%`)
 for (const r of rivers) console.log(`  ${r.name}: ${r.lines.length} line(s), ${r.lines.reduce((s, l) => s + l.length, 0)} points`)
