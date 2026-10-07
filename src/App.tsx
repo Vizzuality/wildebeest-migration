@@ -6,7 +6,6 @@ import { Scene } from './scene/Scene'
 import { useStore } from './store'
 import { useHeightfield } from './terrain'
 import { Curtain, TerrainErrorBoundary } from './ui/Curtain'
-import { Overlay } from './ui/Overlay'
 
 function World() {
   useHeightfield()
@@ -20,7 +19,6 @@ function World() {
       >
         <Scene />
       </Canvas>
-      <Overlay />
       <Curtain leaving />
     </>
   )
@@ -29,7 +27,7 @@ function World() {
 export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.code !== 'Space' || (e.target as HTMLElement).closest('button, select')) return
+      if (e.code !== 'Space') return
       e.preventDefault()
       const { playing, set } = useStore.getState()
       set({ playing: !playing })

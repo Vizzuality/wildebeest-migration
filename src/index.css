@@ -1,11 +1,5 @@
 :root {
   --ink: #fbf3e6;
-  --ink-dim: rgba(251, 243, 230, 0.68);
-  --ink-faint: rgba(251, 243, 230, 0.4);
-  --glass: rgba(26, 22, 18, 0.48);
-  --glass-line: rgba(255, 236, 206, 0.14);
-  --accent: #ffb36b;
-  --rain: #7fc3e8;
   --serif: 'Fraunces', Georgia, serif;
   --sans: 'Inter', system-ui, sans-serif;
 }
@@ -16,85 +10,12 @@ body { font-family: var(--sans); color: var(--ink); -webkit-font-smoothing: anti
 
 .canvas { position: fixed !important; inset: 0; }
 
-.overlay { position: fixed; inset: 0; pointer-events: none; }
-.overlay > * { pointer-events: auto; }
-
-.panel, .story, .controls, .dial {
-  background: var(--glass);
-  backdrop-filter: blur(14px) saturate(1.2);
-  -webkit-backdrop-filter: blur(14px) saturate(1.2);
-  border: 1px solid var(--glass-line);
-  border-radius: 14px;
-}
-
-/* Title */
-.title { position: absolute; top: 28px; left: 32px; max-width: 420px; pointer-events: none; text-shadow: 0 2px 18px rgba(0,0,0,.45); }
-.eyebrow { font-size: 11px; letter-spacing: .22em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
-.title h1 { font-family: var(--serif); font-weight: 600; font-size: clamp(34px, 4.6vw, 58px); line-height: .98; margin: 8px 0 10px; letter-spacing: -.01em; }
-.title p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink-dim); }
-
-/* Month card */
-.story { position: absolute; left: 32px; bottom: 92px; padding: 16px 22px; animation: rise .7s cubic-bezier(.2,.8,.2,1); }
-.story-month { font-family: var(--serif); font-size: 34px; line-height: 1; }
-@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-
-/* Dial */
-.dial { position: absolute; right: 32px; bottom: 92px; width: 256px; padding: 10px 10px 8px; }
-.dial svg { width: 100%; display: block; touch-action: none; cursor: grab; user-select: none; }
-.ring-track { fill: rgba(255,255,255,.06); }
-.ring-bar { fill: var(--rain); opacity: .85; }
-.dial-month { font-size: 10px; font-weight: 600; fill: var(--ink-faint); }
-.dial-month.active { fill: var(--accent); }
-.dial-hand { stroke: var(--accent); stroke-width: 1.5; }
-.dial-knob { fill: var(--accent); stroke: #2a2118; stroke-width: 2; filter: drop-shadow(0 0 6px rgba(255,179,107,.8)); }
-.dial-center { cursor: pointer; }
-.dial-center circle { fill: rgba(255,255,255,.06); stroke: var(--glass-line); transition: fill .2s; }
-.dial-center:hover circle { fill: rgba(255,255,255,.12); }
-.dial-center rect, .dial-center path { fill: var(--ink); }
-.dial-legend { font-size: 10.5px; color: var(--ink-faint); text-align: center; padding: 2px 6px 4px; line-height: 1.4; }
-.dial-legend .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--rain); vertical-align: -1px; margin-right: 3px; }
-
-/* Controls */
-.controls { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); display: flex; gap: 6px; padding: 6px; align-items: center; }
-.controls button {
-  font: 500 12.5px var(--sans); color: var(--ink-dim); background: transparent; border: 1px solid transparent;
-  border-radius: 9px; padding: 7px 12px; cursor: pointer; transition: background .15s, color .15s;
-}
-.controls button:hover { background: rgba(255,255,255,.07); color: var(--ink); }
-.controls button.on { background: rgba(255,179,107,.18); color: var(--ink); border-color: rgba(255,179,107,.35); }
-.seg { display: flex; gap: 2px; }
-.seg button { padding: 7px 9px; font-variant-numeric: tabular-nums; }
-.controls button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-
-.foot { position: absolute; left: 32px; right: 32px; bottom: 30px; pointer-events: none; font-size: 11px; color: var(--ink-faint); display: none; }
-.foot a { color: var(--ink-dim); pointer-events: auto; }
-
 /* In-scene labels */
 .label { font-size: 11px; font-weight: 500; color: var(--ink); white-space: nowrap; text-shadow: 0 1px 4px rgba(0,0,0,.8), 0 0 12px rgba(0,0,0,.4); pointer-events: none; user-select: none; display: flex; align-items: center; gap: 5px; }
 .label i { width: 5px; height: 5px; border-radius: 50%; background: var(--ink); box-shadow: 0 0 0 2px rgba(0,0,0,.3); }
 .label.country { font-family: var(--serif); font-size: 15px; letter-spacing: .5em; color: rgba(255,255,255,.5); font-weight: 400; }
 .label.water { font-family: var(--serif); font-style: italic; font-size: 14px; color: #bfe3ef; }
 .label.river { font-family: var(--serif); font-style: italic; font-size: 12px; color: #cfe8ef; }
-
-/* Notes along the bottom edge on wide screens */
-@media (min-width: 1100px) {
-  .foot { display: flex; justify-content: space-between; bottom: 8px; }
-  .controls { bottom: 30px; }
-}
-
-@media (max-width: 820px) {
-  .title { top: 16px; left: 16px; right: 16px; }
-  .title p { display: none; }
-  .story { left: 16px; bottom: 76px; padding: 12px 16px; }
-  .story-month { font-size: 26px; }
-  .dial { right: 16px; top: 120px; bottom: auto; width: 150px; padding: 6px; }
-  .dial-legend { display: none; }
-  .controls { left: 16px; right: 16px; transform: none; bottom: 16px; overflow-x: auto; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .story { animation: none; }
-}
 
 .curtain { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #e9c79c; color: #3a2d1f; font-family: var(--serif); font-size: 22px; }
 .curtain p { margin: 0; }

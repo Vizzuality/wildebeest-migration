@@ -18,12 +18,6 @@ export function unproject(x: number, z: number): LonLat {
   return [x / KM_PER_DEG + LON0, -z / KM_PER_DEG + LAT0]
 }
 
-export const MONTHS = [
-  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
-]
-export const MONTHS_SHORT = MONTHS.map((m) => m.slice(0, 3).toUpperCase())
-
 // Approximate monthly rainfall (mm), illustrative. South = Ndutu plains, north = Mara.
 export const RAIN_SOUTH = [80, 85, 115, 125, 50, 6, 2, 5, 10, 25, 70, 85]
 export const RAIN_NORTH = [85, 95, 135, 190, 115, 50, 40, 60, 65, 75, 110, 105]
