@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import * as THREE from 'three'
 import { MAP, project } from '../geo'
 import { GLSL_COMMON, shared } from '../shaders/common'
+import { RIVER_GLSL, riverUniforms } from '../shaders/rivers'
 import { useHeightfield, type Heightfield } from '../terrain'
 import { HORIZON } from './Sky'
 
@@ -26,6 +27,7 @@ void main() {
 
 const fragment = /* glsl */ `
 ${GLSL_COMMON}
+${RIVER_GLSL}
 uniform vec2 uCrater;
 uniform vec2 uCraterLake;
 varying vec3 vWorld;
@@ -105,6 +107,21 @@ void main() {
   float steep = smoothstep(0.86, 0.62, N.y);
   col = mix(col, rock, steep * 0.8);
 
+  // Rivers: pale Lecho, water turbid with silt when it runs and dark olive once it stands in Pozas.
+  River river = riverAt(xz, fw);
+  float onLand = 1.0 - smoothstep(0.4, 0.9, lake);
+  float weight = mix(0.75, 1.0, river.main) * onLand;
+  vec3 waterCol = mix(srgb(vec3(0.15, 0.18, 0.11)), srgb(vec3(0.36, 0.30, 0.20)), smoothstep(0.3, 0.85, river.stage));
+  // The current only shows close up; from the usual view it would just shimmer.
+  float close = 1.0 - smoothstep(0.01, 0.05, fw);
+  if (close > 0.0 && river.water > 0.0) {
+    vec2 across = vec2(-river.flow.y, river.flow.x);
+    float streak = tnoise(vec2(dot(xz, river.flow) * 8.0 - uClock * (0.3 + 0.6 * river.stage), dot(xz, across) * 40.0));
+    waterCol *= 1.0 + 0.12 * streak * close;
+  }
+  col = mix(col, srgb(vec3(0.62, 0.54, 0.41)), river.lecho * weight);
+  col = mix(col, waterCol, river.water * weight);
+
   // Ngorongoro crater floor and Lake Magadi, its soda lake.
   float dC = distance(xz, uCrater);
   col = mix(col, fresh, smoothstep(9.0, 7.0, dC) * 0.4);
@@ -117,6 +134,8 @@ void main() {
 
   vec3 lit = sunlight(col, N, cloudShadow(xz));
   lit += water * lake * pow(max(dot(reflect(-uSunDir, N), vec3(0.0, 1.0, 0.0)), 0.0), 8.0) * 0.08;
+  float glint = pow(max(dot(reflect(-uSunDir, vec3(0.0, 1.0, 0.0)), normalize(cameraPosition - vWorld)), 0.0), 60.0);
+  lit += srgb(vec3(1.0, 0.9, 0.75)) * glint * river.water * weight * 0.6;
 
   gl_FragColor = vec4(lit, 1.0);
   #include <tonemapping_fragment>
@@ -170,6 +189,7 @@ export function Terrain() {
         fragmentShader: fragment,
         uniforms: {
           ...shared,
+          ...riverUniforms,
           uCrater: { value: new THREE.Vector2(...CRATER) },
           uCraterLake: { value: new THREE.Vector2(...CRATER_LAKE) },
         },

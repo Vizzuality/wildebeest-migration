@@ -28,6 +28,22 @@ export const MONTHS_SHORT = MONTHS.map((m) => m.slice(0, 3).toUpperCase())
 export const RAIN_SOUTH = [80, 85, 115, 125, 50, 6, 2, 5, 10, 25, 70, 85]
 export const RAIN_NORTH = [85, 95, 135, 190, 115, 50, 40, 60, 65, 75, 110, 105]
 
+// Caudal per river and month, Jan–Dec, as a stage: 1 crecida, ~0.6 bajo, ~0.3 Pozas, 0 seco.
+// Illustrative. The Mara peaks in Apr–May and Dec and bottoms out in Feb before the long rains
+// (Mara Bridge gauge), but never stops; the Grumeti and Mbalageti break into Pozas in the dry
+// season; the sand rivers of the plains and Olduvai run dry.
+export const CAUDAL: Record<string, number[]> = {
+  Mara: [0.78, 0.7, 0.8, 0.95, 1.0, 0.86, 0.78, 0.76, 0.74, 0.74, 0.84, 0.92],
+  Grumeti: [0.7, 0.65, 0.8, 0.95, 0.85, 0.5, 0.32, 0.28, 0.25, 0.3, 0.55, 0.7],
+  Mbalageti: [0.68, 0.62, 0.8, 0.9, 0.7, 0.35, 0.25, 0.22, 0.22, 0.28, 0.5, 0.65],
+  Orangi: [0.55, 0.5, 0.7, 0.8, 0.5, 0.15, 0, 0, 0, 0.05, 0.35, 0.5],
+  Seronera: [0.55, 0.5, 0.7, 0.8, 0.5, 0.15, 0, 0, 0, 0.05, 0.35, 0.5],
+  Sand: [0.55, 0.45, 0.65, 0.85, 0.7, 0.35, 0.15, 0.1, 0.1, 0.15, 0.45, 0.6],
+  Talek: [0.55, 0.45, 0.65, 0.85, 0.7, 0.35, 0.15, 0.1, 0.1, 0.15, 0.45, 0.6],
+  'Olare Orok': [0.55, 0.45, 0.65, 0.85, 0.7, 0.35, 0.15, 0.1, 0.1, 0.15, 0.45, 0.6],
+  Oldupai: [0.35, 0.3, 0.5, 0.55, 0.2, 0, 0, 0, 0, 0, 0.15, 0.3],
+}
+
 // Kenya–Tanzania border: along the 1°S parallel across Lake Victoria, then a straight line
 // from the shore towards Kilimanjaro.
 export function borderLat(lon: number) {
