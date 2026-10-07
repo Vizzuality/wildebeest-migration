@@ -38,7 +38,8 @@ varying vec2 vMask;
 float canopy(vec2 xz, float tree, float fw) {
   float clumps = 1.0 - smoothstep(0.03, 0.12, fw);
   float crowns = 1.0 - smoothstep(0.008, 0.03, fw);
-  float n = snoise(xz * 4.0) * clumps * 0.6 + snoise(xz * 14.0) * crowns * 0.4;
+  if (clumps + crowns <= 0.0) return tree;
+  float n = tnoise(xz * 4.0) * clumps * 0.6 + tnoise(xz * 14.0) * crowns * 0.4;
   float u = 0.5 + 0.5 * n / max(clumps * 0.6 + crowns * 0.4, 1e-3);
   float sharp = smoothstep(1.0 - tree - 0.12, 1.0 - tree + 0.12, u);
   return mix(tree, sharp, max(clumps, crowns));
@@ -55,9 +56,9 @@ void main() {
   float lake = vMask.y;
   float fw = length(fwidth(xz));
 
-  float n1 = snoise(xz * 0.08);
-  float n2 = snoise(xz * 0.35 + 3.0);
-  float n3 = snoise(xz * 2.2 - 7.0) * (1.0 - smoothstep(0.05, 0.2, fw));
+  float n1 = tnoise(xz * 0.08);
+  float n2 = tnoise(xz * 0.35 + 3.0);
+  float n3 = tnoise(xz * 2.2 - 7.0) * (1.0 - smoothstep(0.05, 0.2, fw));
   float g = clamp(greenness(xz.y, uMonth) * (0.9 + 0.15 * n1), 0.0, 1.0);
 
   // Hierba swings hardest with the rain: straw in the dry season, fresh green in the rains.
@@ -76,7 +77,7 @@ void main() {
   float dense = smoothstep(0.35, 0.8, tree);
   vec3 acacia = mix(srgb(vec3(0.44, 0.42, 0.22)), srgb(vec3(0.26, 0.34, 0.13)), 0.35 + 0.65 * g);
   vec3 forest = srgb(vec3(0.13, 0.24, 0.10));
-  vec3 treeCol = mix(acacia, forest, dense) * (0.8 + 0.3 * (0.5 + 0.5 * snoise(xz * 11.0 + 5.0)));
+  vec3 treeCol = mix(acacia, forest, dense) * (0.8 + 0.3 * (0.5 + 0.5 * tnoise(xz * 11.0 + 5.0)));
 
   // Crowns, plus the shadow each one throws away from the sun.
   float c = canopy(xz, tree, fw);
@@ -95,7 +96,7 @@ void main() {
   col = mix(col, srgb(vec3(0.86, 0.80, 0.78)), smoothstep(2.0, 1.5, distance(xz, uCraterLake)));
 
   // Lakes.
-  float shimmer = 0.5 + 0.5 * snoise(xz * 0.15 + vec2(uClock * 0.05, uClock * 0.03));
+  float shimmer = 0.5 + 0.5 * tnoise(xz * 0.15 + vec2(uClock * 0.05, uClock * 0.03));
   vec3 water = mix(srgb(vec3(0.07, 0.20, 0.27)), srgb(vec3(0.16, 0.36, 0.42)), shimmer * 0.6);
   col = mix(col, water, smoothstep(0.4, 0.9, lake));
 

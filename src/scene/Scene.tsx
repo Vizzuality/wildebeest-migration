@@ -1,4 +1,4 @@
-import { useFrame } from '@react-three/fiber'
+import { useFrame, useThree } from '@react-three/fiber'
 import { Bloom, EffectComposer, Noise, ToneMapping, Vignette } from '@react-three/postprocessing'
 import { ToneMappingMode } from 'postprocessing'
 import { MONTHS_PER_SECOND, useStore } from '../store'
@@ -26,6 +26,8 @@ function Clock() {
 }
 
 export function Scene() {
+  // On high-density screens the extra pixels already smooth edges; MSAA there cost ~11 ms a frame.
+  const dpr = useThree((s) => s.viewport.dpr)
   return (
     <>
       <Clock />
@@ -38,7 +40,7 @@ export function Scene() {
       <Border />
       <Labels />
       <CameraRig />
-      <EffectComposer multisampling={4}>
+      <EffectComposer multisampling={dpr >= 1.5 ? 0 : 4}>
         <Bruma />
         <Bloom intensity={0.55} luminanceThreshold={0.82} mipmapBlur />
         <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
