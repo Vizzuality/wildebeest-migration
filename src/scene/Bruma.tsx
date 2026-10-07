@@ -2,7 +2,7 @@ import { useFrame } from '@react-three/fiber'
 import { BlendFunction, Effect, EffectAttribute } from 'postprocessing'
 import { useMemo } from 'react'
 import * as THREE from 'three'
-import { MAP } from '../geo'
+import { MAP, PLACES, project } from '../geo'
 import { SUN_DIR, shared } from '../shaders/common'
 import { mulberry32 } from '../terrain'
 
@@ -16,8 +16,96 @@ const SLAB_BOTTOM = -4
 const STEPS = 28
 
 /** How far the ragged shoreline can reach inwards (km) before the edge calima is gone. */
-const EDGE_REACH = 50
-const RAGGED = 23
+const EDGE_REACH = 40
+/** Superellipse exponent: 2 is a true ellipse, higher squares it off towards the Mapa's corners. */
+const OVAL = 4
+/** Tongues of calima reach this far (km) inwards; the shoreline never retreats past the edge. */
+const TONGUES = 58
+/** Sideways wobble (km) that bends the straight sides of the Mapa. */
+const WARP = 16
+/** Every named place keeps a clearing this wide (km); the calima thins out over the next stretch. */
+const CLEARING = 16
+const CLEARING_FADE = 18
+const PLACE_XZ = PLACES.map((p) => project(p.at))
+
+/** The shoreline is baked once into a texture so each raymarch step is a single lookup. */
+const FIELD_MARGIN = 40
+const FIELD_MIN = new THREE.Vector2(MAP.minX - FIELD_MARGIN, MAP.minZ - FIELD_MARGIN)
+const FIELD_SIZE = new THREE.Vector2(MAP.maxX - MAP.minX + FIELD_MARGIN * 2, MAP.maxZ - MAP.minZ + FIELD_MARGIN * 2)
+/** Texels store distance + FIELD_OFFSET in km, so the shoreline spans −64…191 km at 1 km precision. */
+const FIELD_OFFSET = 64
+
+function smooth(t: number) {
+  return t * t * (3 - 2 * t)
+}
+
+function smoothstep(a: number, b: number, x: number) {
+  return smooth(Math.min(1, Math.max(0, (x - a) / (b - a))))
+}
+
+function valueNoise(seed: number) {
+  const lattice = (ix: number, iz: number) => {
+    const h = Math.sin(ix * 127.1 + iz * 311.7 + seed * 74.7) * 43758.5453
+    return h - Math.floor(h)
+  }
+  return (x: number, z: number) => {
+    const ix = Math.floor(x)
+    const iz = Math.floor(z)
+    const fx = smooth(x - ix)
+    const fz = smooth(z - iz)
+    const a = lattice(ix, iz) + (lattice(ix + 1, iz) - lattice(ix, iz)) * fx
+    const b = lattice(ix, iz + 1) + (lattice(ix + 1, iz + 1) - lattice(ix, iz + 1)) * fx
+    return a + (b - a) * fz
+  }
+}
+
+/** Distance inside an oval (a superellipse filling the Mapa), in km, negative outside. */
+function ovalInside(x: number, z: number) {
+  const rx = (MAP.maxX - MAP.minX) / 2
+  const rz = (MAP.maxZ - MAP.minZ) / 2
+  const ux = Math.abs(x - (MAP.minX + MAP.maxX) / 2) / rx
+  const uz = Math.abs(z - (MAP.minZ + MAP.maxZ) / 2) / rz
+  return (1 - (ux ** OVAL + uz ** OVAL) ** (1 / OVAL)) * Math.min(rx, rz)
+}
+
+/**
+ * The oval, bent sideways, bitten by tongues of calima, and drawn back from every named place
+ * with a ragged rim rather than a round hole.
+ */
+function shoreline(x: number, z: number) {
+  const [n1, n2, n3, n4, n5, n6] = SHORE_NOISE
+  const qx = x * 0.022
+  const qz = z * 0.022
+  const wx = n1(qx * 0.7, qz * 0.7) - 0.5
+  const wz = n2(qx * 0.7, qz * 0.7) - 0.5
+  let d = ovalInside(x + wx * WARP * 2, z + wz * WARP * 2)
+  const tongue = n3(qx, qz) * 0.62 + n4(qx * 2.7, qz * 2.7) * 0.26 + n5(qx * 7.3, qz * 7.3) * 0.12
+  d += 8 - smoothstep(0.3, 0.75, tongue) * TONGUES
+  let near = Infinity
+  for (const [px, pz] of PLACE_XZ) near = Math.min(near, Math.hypot(x - px, z - pz))
+  near += (n6(qx * 4.3, qz * 4.3) - 0.5) * 12
+  const clearing = 1 - smoothstep(CLEARING, CLEARING + CLEARING_FADE, near)
+  return Math.max(d, clearing * EDGE_REACH)
+}
+
+const SHORE_NOISE = [1, 2, 3, 4, 5, 6].map(valueNoise)
+
+function shorelineTexture() {
+  const w = Math.round(FIELD_SIZE.x)
+  const h = Math.round(FIELD_SIZE.y)
+  const data = new Uint8Array(w * h)
+  for (let j = 0; j < h; j++) {
+    for (let i = 0; i < w; i++) {
+      const d = shoreline(FIELD_MIN.x + ((i + 0.5) / w) * FIELD_SIZE.x, FIELD_MIN.y + ((j + 0.5) / h) * FIELD_SIZE.y)
+      data[j * w + i] = Math.max(0, Math.min(255, Math.round(d + FIELD_OFFSET)))
+    }
+  }
+  const tex = new THREE.DataTexture(data, w, h, THREE.RedFormat)
+  tex.minFilter = THREE.LinearFilter
+  tex.magFilter = THREE.LinearFilter
+  tex.needsUpdate = true
+  return tex
+}
 
 const fragment = /* glsl */ `
 uniform mat4 uProjInv;
@@ -30,6 +118,9 @@ uniform vec3 uSunDir;
 uniform vec3 uHaze;
 uniform vec3 uSun;
 uniform highp sampler3D uNoise;
+uniform sampler2D uShore;
+uniform vec2 uShoreMin;
+uniform vec2 uShoreSize;
 
 float hash13(vec3 p) {
   p = fract(p * 0.1031);
@@ -40,15 +131,18 @@ float hash13(vec3 p) {
 // One lattice cell per unit, like a hash-based value noise.
 float noise(vec3 p) { return texture(uNoise, p / 32.0).r; }
 
+// Distance inside the Mapa's oval (negative outside), without the ragged shoreline.
 float rawInside(vec2 xz) {
-  vec2 e = min(xz - uMapMin, uMapMax - xz);
-  return min(e.x, e.y);
+  vec2 radius = (uMapMax - uMapMin) * 0.5;
+  vec2 u = abs(xz - (uMapMin + uMapMax) * 0.5) / radius;
+  float r = pow(pow(u.x, ${OVAL.toFixed(1)}) + pow(u.y, ${OVAL.toFixed(1)}), ${(1 / OVAL).toFixed(4)});
+  return (1.0 - r) * min(radius.x, radius.y);
 }
 
-// Distance inside the Mapa (negative outside), with a ragged, slowly drifting shoreline.
+// The baked shoreline, breathing a few km in and out over time.
 float inside(vec2 xz) {
-  vec3 q = vec3(xz * 0.022, uClock * 0.01);
-  return rawInside(xz) + (noise(q) - 0.5) * ${(RAGGED * 1.5).toFixed(1)} + (noise(q * 3.1) - 0.5) * 10.0;
+  float d = texture(uShore, (xz - uShoreMin) / uShoreSize).r * 255.0 - ${FIELD_OFFSET.toFixed(1)};
+  return d + (noise(vec3(xz * 0.05, uClock * 0.02)) - 0.5) * 8.0;
 }
 
 // Extinction per km of the edge calima.
@@ -102,7 +196,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   }
   // Distance to the edge is concave along a straight segment, so if both ends are deep
   // inside the Mapa, the whole segment is clear of the edge calima.
-  float clear = ${(EDGE_REACH + RAGGED + 6).toFixed(1)};
+  float clear = ${(EDGE_REACH + TONGUES + WARP * 1.5 + 4).toFixed(1)};
   if (t1 > t0 && min(rawInside((ro + rd * t0).xz), rawInside((ro + rd * t1).xz)) < clear) {
     float dt = (t1 - t0) / float(${STEPS});
     float t = t0 + dt * hash13(vec3(gl_FragCoord.xy, fract(uClock) * 61.0));
@@ -164,6 +258,9 @@ class BrumaEffect extends Effect {
         ['uHaze', new THREE.Uniform(srgb('#e6cdaa'))],
         ['uSun', new THREE.Uniform(srgb('#ffd9a8'))],
         ['uNoise', new THREE.Uniform(noiseTexture())],
+        ['uShore', new THREE.Uniform(shorelineTexture())],
+        ['uShoreMin', new THREE.Uniform(FIELD_MIN)],
+        ['uShoreSize', new THREE.Uniform(FIELD_SIZE)],
       ]),
     })
   }
