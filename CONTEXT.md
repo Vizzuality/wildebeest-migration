@@ -40,6 +40,22 @@ _Avoid_: river, cauce
 Un río real con nombre que se muestra por contexto (Orangi, Seronera, Sand River, Talek, Olare Orok, Oldupai), con menos peso visual que un Río principal.
 _Avoid_: tributario, arroyo, stream
 
+**Caudal**:
+El agua que lleva cada río en cada mes de un año medio, con su propia curva por río, no deducida del Verdor. El Mara lleva agua todo el año; otros ríos pueden quedarse sin ella.
+_Avoid_: flow, nivel, lluvia del río
+
+**Lecho**:
+El cauce entero de un río, lleve agua o no. Con poco Caudal asoma como arena pálida a los lados del agua; seco, es lo único que queda.
+_Avoid_: cauce, canal, riverbed
+
+**Poza**:
+Charca suelta que queda en el Lecho cuando el Caudal ya no da para un hilo continuo. Aparecen siempre en los mismos sitios del río.
+_Avoid_: charco, pool, waterhole
+
+**Cruce**:
+Un tramo concreto de un Río principal por el que la manada lo atraviesa en una ventana de meses conocida (el Mara entre julio y octubre, el Grumeti en junio y julio). Pertenece a la migración, no al río.
+_Avoid_: vado, crossing, paso
+
 ### Vegetación
 
 **Cobertura**:
