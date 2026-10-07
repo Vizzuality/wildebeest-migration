@@ -13,7 +13,6 @@ varying vec3 vWorld;
 varying vec3 vNormal;
 varying vec4 vCover;
 varying vec2 vMask;
-#include <fog_pars_vertex>
 void main() {
   vec4 world = modelMatrix * vec4(position, 1.0);
   vWorld = world.xyz;
@@ -22,7 +21,6 @@ void main() {
   vMask = aMask;
   vec4 mvPosition = viewMatrix * world;
   gl_Position = projectionMatrix * mvPosition;
-  #include <fog_vertex>
 }
 `
 
@@ -30,12 +28,10 @@ const fragment = /* glsl */ `
 ${GLSL_COMMON}
 uniform vec2 uCrater;
 uniform vec2 uCraterLake;
-uniform vec2 uMapMax;
 varying vec3 vWorld;
 varying vec3 vNormal;
 varying vec4 vCover;
 varying vec2 vMask;
-#include <fog_pars_fragment>
 
 // Tree crowns as a mask whose area matches the Cobertura's tree share. Each scale of clumping
 // fades out once it is smaller than a pixel, so far away it settles on the plain average.
@@ -106,14 +102,9 @@ void main() {
   vec3 lit = sunlight(col, N, cloudShadow(xz));
   lit += water * lake * pow(max(dot(reflect(-uSunDir, N), vec3(0.0, 1.0, 0.0)), 0.0), 8.0) * 0.08;
 
-  vec2 edge = min(xz - uMapMin, uMapMax - xz);
-  float fade = 1.0 - smoothstep(0.0, 22.0, min(edge.x, edge.y));
-  lit = mix(lit, fogColor, fade);
-
   gl_FragColor = vec4(lit, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
-  #include <fog_fragment>
 }
 `
 
@@ -163,12 +154,9 @@ export function Terrain() {
         fragmentShader: fragment,
         uniforms: {
           ...shared,
-          ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
           uCrater: { value: new THREE.Vector2(...CRATER) },
           uCraterLake: { value: new THREE.Vector2(...CRATER_LAKE) },
-          uMapMax: { value: new THREE.Vector2(MAP.maxX, MAP.maxZ) },
         },
-        fog: true,
       }),
     [],
   )

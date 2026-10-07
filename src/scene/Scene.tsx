@@ -3,10 +3,11 @@ import { Bloom, EffectComposer, Noise, ToneMapping, Vignette } from '@react-thre
 import { ToneMappingMode } from 'postprocessing'
 import { MONTHS_PER_SECOND, useStore } from '../store'
 import { shared } from '../shaders/common'
+import { Bruma } from './Bruma'
 import { CameraRig } from './CameraRig'
 import { Border, Labels } from './Overlays'
 import { Rivers } from './Rivers'
-import { HORIZON, Sky } from './Sky'
+import { Sky } from './Sky'
 import { Terrain } from './Terrain'
 import { Groves } from './Groves'
 
@@ -28,7 +29,6 @@ export function Scene() {
   return (
     <>
       <Clock />
-      <fog attach="fog" args={[HORIZON, 260, 820]} />
       <hemisphereLight args={['#b9c7d8', '#6b5a3f', 1.1]} />
       <directionalLight position={[-62, 55, 56]} intensity={2.4} color="#ffdcae" />
       <Sky />
@@ -39,6 +39,7 @@ export function Scene() {
       <Labels />
       <CameraRig />
       <EffectComposer multisampling={4}>
+        <Bruma />
         <Bloom intensity={0.55} luminanceThreshold={0.82} mipmapBlur />
         <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
         <Noise opacity={0.035} />

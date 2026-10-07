@@ -7,7 +7,7 @@ Visualización 3D del ciclo anual de la migración de ñus en el ecosistema Sere
 ### Territorio
 
 **Mapa**:
-El rectángulo geográfico que se representa, de lon 33,27 a 35,98 y de lat −0,67 a −3,67, con margen para que ningún lugar de la historia quede en la bruma del borde, medido en kilómetros desde el origen (34,85, −2,3).
+El rectángulo geográfico que se representa, de lon 33,27 a 35,98 y de lat −0,67 a −3,67, con margen para que ningún lugar de la historia quede en la Bruma, medido en kilómetros desde el origen (34,85, −2,3).
 _Avoid_: mundo, escena, bbox
 
 **DEM**:
@@ -53,3 +53,13 @@ _Avoid_: riparian, ribera
 **Bosquete**:
 Un grupo de árboles o matas que se dibuja con volumen sobre la Cobertura. Hay tres tipos: acacia paraguas, copa redonda y matorral bajo.
 _Avoid_: árbol, tree, instancia
+
+### Atmósfera
+
+**Bruma**:
+Masa de calima cálida y volumétrica que envuelve el Mapa por sus bordes. Su contorno es irregular: se encharca en valles y lagos y se retira en las tierras altas, de modo que el Relieve la recorta.
+_Avoid_: niebla de guerra, fog, fog of war, fade del borde
+
+**Perspectiva aérea**:
+El velo cálido y sutil que aclara el terreno lejano y vela un poco los valles, dentro del Mapa. Forma un mismo continuo con la Bruma.
+_Avoid_: fog lineal, distance fog

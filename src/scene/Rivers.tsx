@@ -5,18 +5,15 @@ import { useHeightfield, type RiverLine } from '../terrain'
 
 const vertex = /* glsl */ `
 varying vec2 vUv;
-#include <fog_pars_vertex>
 void main() {
   vUv = uv;
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mvPosition;
-  #include <fog_vertex>
 }
 `
 const fragment = /* glsl */ `
 ${GLSL_COMMON}
 varying vec2 vUv;
-#include <fog_pars_fragment>
 void main() {
   float flow = snoise(vec2(vUv.x * 0.6 - uClock * 0.35, vUv.y * 3.0));
   float edge = smoothstep(0.0, 0.25, vUv.y) * smoothstep(1.0, 0.75, vUv.y);
@@ -29,7 +26,6 @@ void main() {
   gl_FragColor = vec4(col, edge * 0.95);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
-  #include <fog_fragment>
 }
 `
 
@@ -76,10 +72,9 @@ export function Rivers() {
       new THREE.ShaderMaterial({
         vertexShader: vertex,
         fragmentShader: fragment,
-        uniforms: { ...shared, ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog) },
+        uniforms: { ...shared },
         transparent: true,
         depthWrite: false,
-        fog: true,
         side: THREE.DoubleSide,
       }),
     [],

@@ -107,7 +107,6 @@ varying vec3 vWorld;
 varying float vCrown;
 varying float vShade;
 varying float vTone;
-#include <fog_pars_vertex>
 void main() {
   vec3 origin = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
   float fade = 1.0 - smoothstep(${FADE_START.toFixed(1)}, ${FADE_END.toFixed(1)}, distance(cameraPosition, origin));
@@ -119,7 +118,6 @@ void main() {
   vTone = hash12(origin.xz);
   vec4 mvPosition = viewMatrix * world;
   gl_Position = projectionMatrix * mvPosition;
-  #include <fog_vertex>
 }
 `
 
@@ -128,13 +126,11 @@ ${GLSL_COMMON}
 uniform vec3 uDry;
 uniform vec3 uGreen;
 uniform float uSeasonal;
-uniform vec2 uMapMax;
 varying vec3 vNormal;
 varying vec3 vWorld;
 varying float vCrown;
 varying float vShade;
 varying float vTone;
-#include <fog_pars_fragment>
 void main() {
   float g = greenness(vWorld.z, uMonth) * uSeasonal + (1.0 - uSeasonal);
   vec3 leaf = mix(uDry, uGreen, g) * (0.85 + 0.3 * vTone);
@@ -144,13 +140,9 @@ void main() {
   N = normalize(mix(N, vec3(0.0, 1.0, 0.0), 0.35 * vCrown));
   vec3 lit = sunlight(col, N, cloudShadow(vWorld.xz));
 
-  vec2 edge = min(vWorld.xz - uMapMin, uMapMax - vWorld.xz);
-  lit = mix(lit, fogColor, 1.0 - smoothstep(0.0, 22.0, min(edge.x, edge.y)));
-
   gl_FragColor = vec4(lit, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
-  #include <fog_fragment>
 }
 `
 
@@ -223,13 +215,10 @@ export function Groves() {
           fragmentShader: fragment,
           uniforms: {
             ...shared,
-            ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
             uDry: { value: LOOK[kind].dry },
             uGreen: { value: LOOK[kind].green },
             uSeasonal: { value: LOOK[kind].seasonal },
-            uMapMax: { value: new THREE.Vector2(MAP.maxX, MAP.maxZ) },
           },
-          fog: true,
         }),
       })),
     [],
