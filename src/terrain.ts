@@ -152,7 +152,7 @@ export function useHeightfield() {
   return use(loadHeightfield())
 }
 
-/** Closest point on a named river to (x, z), so Cruces always sit on the real channel. */
+/** Closest point on a named river to (x, z), so river labels sit on the real channel. */
 export function snapToRiver(rivers: RiverLine[], name: string, x: number, z: number): [number, number] {
   let best: [number, number] = [x, z]
   let bestD = Infinity

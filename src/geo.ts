@@ -5,7 +5,7 @@ export const LON0 = 34.85
 export const LAT0 = -2.3
 const KM_PER_DEG = 111
 
-// Sized so every place in the story sits clear of the ~22 km fade into the haze at the edges.
+// Sized so every labelled place sits clear of the Bruma at the edges.
 export const MAP = { minX: -175, maxX: 125, minZ: -181, maxZ: 152 }
 
 export type LonLat = [number, number]
@@ -24,27 +24,6 @@ export const MONTHS = [
 ]
 export const MONTHS_SHORT = MONTHS.map((m) => m.slice(0, 3).toUpperCase())
 
-// Approximate herd centroid at mid-month, clockwise loop.
-export const ROUTE: LonLat[] = [
-  [35.05, -2.95], // Ene · llanuras del sur
-  [35.08, -3.05], // Feb · Ndutu, partos
-  [34.98, -2.95], // Mar
-  [34.82, -2.65], // Abr · Moru / Seronera
-  [34.6, -2.38], // May · corredor occidental
-  [34.35, -2.15], // Jun · río Grumeti
-  [34.6, -1.78], // Jul · hacia el norte
-  [34.9, -1.6], // Ago · cruces del Mara
-  [35.08, -1.38], // Sep · Masái Mara
-  [35.17, -1.52], // Oct · retorno
-  [35.2, -2.0], // Nov · Lobo
-  [35.1, -2.55], // Dic · bajando al sur
-]
-export const ROUTE_XZ = ROUTE.map(project)
-
-// Herd shape per month (km): sideways spread and isotropic dispersal.
-export const SPREAD = [20, 22, 20, 14, 10, 8, 9, 8, 12, 10, 10, 14]
-export const DISPERSE = [16, 18, 16, 7, 4, 3, 3, 3, 6, 4, 4, 8]
-
 // Approximate monthly rainfall (mm), illustrative. South = Ndutu plains, north = Mara.
 export const RAIN_SOUTH = [80, 85, 115, 125, 50, 6, 2, 5, 10, 25, 70, 85]
 export const RAIN_NORTH = [85, 95, 135, 190, 115, 50, 40, 60, 65, 75, 110, 105]
@@ -55,7 +34,7 @@ export function borderLat(lon: number) {
   return -1.0 - Math.max(0, lon - 33.92) * 0.54
 }
 
-// River labels and Cruces name their river so they can be snapped onto the real channel.
+// River labels name their river so they can be snapped onto the real channel.
 export const PLACES: { name: string; at: LonLat; kind?: 'country' | 'water' | 'river'; river?: string }[] = [
   { name: 'Ndutu', at: [34.98, -3.0] },
   { name: 'Seronera', at: [34.82, -2.43] },
@@ -72,141 +51,3 @@ export const PLACES: { name: string; at: LonLat; kind?: 'country' | 'water' | 'r
   { name: 'Río Mara', at: [34.55, -1.5], kind: 'river', river: 'Mara' },
   { name: 'Río Grumeti', at: [34.62, -2.05], kind: 'river', river: 'Grumeti' },
 ]
-
-// Cruces and the months they light up.
-export const HOTSPOTS: { name: string; at: LonLat; river: string; months: [number, number] }[] = [
-  { name: 'Cruce del Mara', at: [34.9, -1.58], river: 'Mara', months: [6.6, 9.8] },
-  { name: 'Cruce del Grumeti', at: [34.4, -2.13], river: 'Grumeti', months: [4.8, 6.4] },
-]
-
-export interface MonthStory {
-  place: string
-  text: string
-}
-
-export const STORY: MonthStory[] = [
-  {
-    place: 'Llanuras del sur',
-    text: 'Las lluvias cortas han reverdecido las llanuras de hierba corta. Más de 1,3 millones de ñus se dispersan para pastar sobre suelos volcánicos ricos en minerales.',
-  },
-  {
-    place: 'Ndutu · temporada de partos',
-    text: 'En apenas tres semanas nacen unas 500.000 crías, alrededor de 8.000 al día. Se ponen en pie a los pocos minutos: la sincronía satura a los depredadores.',
-  },
-  {
-    place: 'Llanuras del sur',
-    text: 'Las crías ganan fuerza. La manada sigue en el sur, aprovechando el pasto tierno antes de las lluvias largas.',
-  },
-  {
-    place: 'Moru · Seronera',
-    text: 'Con las lluvias largas, las llanuras del sur empiezan a agotarse. La manada se agrupa y avanza hacia el noroeste.',
-  },
-  {
-    place: 'Corredor occidental',
-    text: 'Columnas de decenas de kilómetros avanzan hacia el oeste. Es la época de celo: los machos defienden territorios efímeros mientras la manada camina.',
-  },
-  {
-    place: 'Río Grumeti',
-    text: 'Primer gran obstáculo: el Grumeti y sus cocodrilos del Nilo, que llevan meses esperando a la manada.',
-  },
-  {
-    place: 'Rumbo al norte',
-    text: 'El sur ya es paja dorada. La manada empuja hacia el norte, siguiendo las lluvias más regulares de la cuenca del Mara.',
-  },
-  {
-    place: 'Cruces del Mara',
-    text: 'El momento más dramático: miles de ñus se lanzan al río Mara cerca de Kogatende. Corrientes, cocodrilos y estampidas en las orillas.',
-  },
-  {
-    place: 'Masái Mara',
-    text: 'Ya en Kenia, la manada pasta la hierba alta del Mara, regada casi todo el año. Cruzan el río una y otra vez.',
-  },
-  {
-    place: 'Masái Mara · retorno',
-    text: 'El pasto del Mara se agota. Tormentas lejanas en el sur marcan el camino de vuelta.',
-  },
-  {
-    place: 'Lobo · este del parque',
-    text: 'Llegan las lluvias cortas. La manada desciende por el este del Serengeti, a través de los bosques de Lobo.',
-  },
-  {
-    place: 'De vuelta al sur',
-    text: 'Las llanuras del sur vuelven a estar verdes. El ciclo se cierra, y en unas semanas empieza otra vez.',
-  },
-]
-
-// ── Shared math (mirrors the GLSL in shaders/herd.ts) ─────────────────────
-
-function wrap(i: number) {
-  return ((i % 12) + 12) % 12
-}
-
-function catmull(p0: number, p1: number, p2: number, p3: number, f: number) {
-  return 0.5 * (2 * p1 + (-p0 + p2) * f + (2 * p0 - 5 * p1 + 4 * p2 - p3) * f * f + (-p0 + 3 * p1 - 3 * p2 + p3) * f * f * f)
-}
-
-/** Herd centroid at a fractional month (0 = start of January). */
-export function herdPos(month: number): [number, number] {
-  const t = month - 0.5
-  const i1 = Math.floor(t)
-  const f = t - i1
-  const [a, b, c, d] = [i1 - 1, i1, i1 + 1, i1 + 2].map((i) => ROUTE_XZ[wrap(i)])
-  return [catmull(a[0], b[0], c[0], d[0], f), catmull(a[1], b[1], c[1], d[1], f)]
-}
-
-export function periodicLerp(arr: number[], month: number) {
-  const t = month - 0.5
-  const i = Math.floor(t)
-  const f = t - i
-  return arr[wrap(i)] * (1 - f) + arr[wrap(i + 1)] * f
-}
-
-function smoothstep(a: number, b: number, x: number) {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)))
-  return t * t * (3 - 2 * t)
-}
-
-/** 0 on the southern plains, 1 in the Mara. */
-export function northness(z: number) {
-  return smoothstep(80, -110, z)
-}
-
-/** Grass greenness (0–1) at a place and month: rainfall with a ~3-week lag. */
-export function greenness(z: number, month: number) {
-  const m = month - 0.6
-  const r = periodicLerp(RAIN_SOUTH, m) * (1 - northness(z)) + periodicLerp(RAIN_NORTH, m) * northness(z)
-  return smoothstep(0, 110, r)
-}
-
-export const LOOP_SAMPLES = (() => {
-  const pts: [number, number][] = []
-  const n = 1200
-  for (let i = 0; i <= n; i++) pts.push(herdPos((i / n) * 12))
-  return pts
-})()
-
-export const LOOP_LENGTH = (() => {
-  let len = 0
-  for (let i = 1; i < LOOP_SAMPLES.length; i++) {
-    len += Math.hypot(LOOP_SAMPLES[i][0] - LOOP_SAMPLES[i - 1][0], LOOP_SAMPLES[i][1] - LOOP_SAMPLES[i - 1][1])
-  }
-  return len
-})()
-
-export function distanceTravelled(month: number) {
-  const n = LOOP_SAMPLES.length - 1
-  const upto = Math.floor((month / 12) * n)
-  let len = 0
-  for (let i = 1; i <= upto; i++) {
-    len += Math.hypot(LOOP_SAMPLES[i][0] - LOOP_SAMPLES[i - 1][0], LOOP_SAMPLES[i][1] - LOOP_SAMPLES[i - 1][1])
-  }
-  return len
-}
-
-export const CALVES_PER_YEAR = 500_000
-export const BIRTH_START = 0.9
-export const BIRTH_END = 1.8
-
-export function calvesBorn(month: number) {
-  return CALVES_PER_YEAR * smoothstep(BIRTH_START, BIRTH_END, month)
-}

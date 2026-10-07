@@ -33,13 +33,9 @@ _Avoid_: escala Y, multiplier
 ### Agua
 
 **Río principal**:
-Uno de los tres ríos que la manada tiene que cruzar o seguir: Mara, Grumeti y Mbalageti. Son los únicos con etiqueta en el mapa.
+Uno de los tres ríos que estructuran la migración: Mara, Grumeti y Mbalageti. Son los únicos con etiqueta en el mapa.
 _Avoid_: river, cauce
 
 **Afluente**:
 Un río real con nombre que se muestra por contexto (Orangi, Seronera, Sand River, Talek, Olare Orok, Oldupai), con menos peso visual que un Río principal.
 _Avoid_: tributario, arroyo, stream
-
-**Cruce**:
-Un punto de un Río principal donde la manada lo atraviesa en masa durante ciertos meses. Siempre está sobre el cauce real.
-_Avoid_: hotspot, crossing

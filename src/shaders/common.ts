@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { DISPERSE, MAP, RAIN_NORTH, RAIN_SOUTH, ROUTE_XZ, SPREAD } from '../geo'
+import { MAP, RAIN_NORTH, RAIN_SOUTH } from '../geo'
 
 export const SUN_DIR = new THREE.Vector3(-0.62, 0.55, 0.56).normalize()
 
@@ -7,15 +7,11 @@ export const SUN_DIR = new THREE.Vector3(-0.62, 0.55, 0.56).normalize()
 export const shared = {
   uMonth: { value: 0 },
   uClock: { value: 0 },
-  uMoving: { value: 1 },
   uSunDir: { value: SUN_DIR },
   // Filled in by loadHeightfield() before anything that samples them renders.
   uHeight: { value: null as THREE.DataTexture | null },
   uMapMin: { value: new THREE.Vector2(MAP.minX, MAP.minZ) },
   uMapStep: { value: 0 },
-  uPath: { value: ROUTE_XZ.map(([x, z]) => new THREE.Vector2(x, z)) },
-  uSpread: { value: SPREAD },
-  uDisperse: { value: DISPERSE },
   uRainS: { value: RAIN_SOUTH },
   uRainN: { value: RAIN_NORTH },
 }
@@ -23,14 +19,10 @@ export const shared = {
 export const GLSL_COMMON = /* glsl */ `
 uniform float uMonth;
 uniform float uClock;
-uniform float uMoving;
 uniform vec3 uSunDir;
 uniform sampler2D uHeight;
 uniform vec2 uMapMin;
 uniform float uMapStep;
-uniform vec2 uPath[12];
-uniform float uSpread[12];
-uniform float uDisperse[12];
 uniform float uRainS[12];
 uniform float uRainN[12];
 
@@ -51,26 +43,6 @@ float heightAt(vec2 xz) {
 
 int wrap12(int i) { return ((i % 12) + 12) % 12; }
 
-vec2 herdPos(float month) {
-  float t = month - 0.5;
-  float fi = floor(t);
-  float f = t - fi;
-  int i1 = int(fi);
-  vec2 p0 = uPath[wrap12(i1 - 1)];
-  vec2 p1 = uPath[wrap12(i1)];
-  vec2 p2 = uPath[wrap12(i1 + 1)];
-  vec2 p3 = uPath[wrap12(i1 + 2)];
-  return 0.5 * ((2.0 * p1) + (-p0 + p2) * f + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * f * f + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * f * f * f);
-}
-
-float spreadAt(float month) {
-  float t = month - 0.5; float fi = floor(t); int i = int(fi);
-  return mix(uSpread[wrap12(i)], uSpread[wrap12(i + 1)], t - fi);
-}
-float disperseAt(float month) {
-  float t = month - 0.5; float fi = floor(t); int i = int(fi);
-  return mix(uDisperse[wrap12(i)], uDisperse[wrap12(i + 1)], t - fi);
-}
 float rainS(float month) {
   float t = month - 0.5; float fi = floor(t); int i = int(fi);
   return mix(uRainS[wrap12(i)], uRainS[wrap12(i + 1)], t - fi);
@@ -105,25 +77,5 @@ float snoise(vec2 v) {
   g.x = a0.x * x0.x + h.x * x0.y;
   g.yz = a0.yz * x12.xz + h.yz * x12.yw;
   return 130.0 * dot(m, g);
-}
-`
-
-/**
- * Where one animal stands. seed.x = lag (months), seed.y = lateral (−1..1),
- * seed.z/w = dispersal offset (−1..1). Returns xz and writes heading.
- */
-export const GLSL_HERD = /* glsl */ `
-vec2 animalPos(vec4 seed, float phase, out vec2 dir, out float speed) {
-  float t = uMonth + seed.x;
-  vec2 p = herdPos(t);
-  vec2 ahead = herdPos(t + 0.03);
-  vec2 d = ahead - p;
-  speed = length(d) / 0.03; // km per month
-  dir = d / max(length(d), 1e-4);
-  vec2 side = vec2(-dir.y, dir.x);
-  vec2 pos = p + side * seed.y * spreadAt(t) + seed.zw * disperseAt(t);
-  // Slow individual wander so the herd breathes.
-  pos += 0.45 * vec2(sin(uClock * 0.21 + phase * 6.28), cos(uClock * 0.17 + phase * 9.1));
-  return pos;
 }
 `
