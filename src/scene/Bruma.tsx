@@ -6,9 +6,9 @@ import { MAP, PLACES, project } from '../geo'
 import { SUN_DIR, shared } from '../shaders/common'
 import { mulberry32 } from '../terrain'
 
-// Bruma and Perspectiva aérea in one pass. For every pixel the view ray is marched through a
-// field of warm calima: thick and tall beyond the edge of the Mapa, thinning inwards to a low
-// layer that only pools over lakes and low ground. Relief standing above the layer cuts it.
+// Bruma: for every pixel the view ray is marched through a field of warm calima, thick and
+// tall beyond the edge of the Mapa and gone well before the middle, so the land inside stays
+// clear. Relief standing above the layer cuts it.
 
 /** Rays only march through this height band (scene units); above it the air is clear. */
 const SLAB_TOP = 18
@@ -156,16 +156,6 @@ float density(vec3 p) {
   return edge * 0.5 * body * (0.35 + 1.3 * puff);
 }
 
-// Low calima pooling over lakes and low ground everywhere: exponential in height, integrated
-// exactly along the ray instead of marched.
-float pooled(vec3 ro, vec3 rd, float dist) {
-  const float A = 0.03;
-  const float H = 0.9;
-  float start = exp(-ro.y / H);
-  if (abs(rd.y) < 1e-4) return A * start * dist;
-  return A * H * (start - exp(-(ro.y + rd.y * dist) / H)) / rd.y;
-}
-
 void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
   vec4 view = uProjInv * vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
   view /= view.w;
@@ -175,13 +165,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   bool sky = depth >= 1.0;
   float dist = sky ? 4000.0 : distance(world, ro);
 
-  // Perspectiva aérea plus the pooled layer: a warm veil that grows with distance, denser low down.
   vec3 col = inputColor.rgb;
-  if (!sky) {
-    float meanY = max(0.0, (ro.y + world.y) * 0.5);
-    float tau = dist * 0.0016 * exp(-meanY / 40.0) + pooled(ro, rd, dist);
-    col = mix(col, uHaze * 1.05, 1.0 - exp(-tau));
-  }
 
   // Clip the ray to the slab where the edge calima lives.
   float t0 = 0.0;

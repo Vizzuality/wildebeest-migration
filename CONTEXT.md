@@ -57,9 +57,5 @@ _Avoid_: árbol, tree, instancia
 ### Atmósfera
 
 **Bruma**:
-Masa de calima cálida y volumétrica que envuelve el Mapa en un óvalo irregular, con lenguas que entran desde el borde. Se encharca en valles y lagos, se retira en las tierras altas (el Relieve la recorta) y deja siempre despejado cada lugar con nombre.
+Masa de calima cálida y volumétrica que envuelve el Mapa en un óvalo irregular, con lenguas que entran desde el borde. Solo existe hacia los bordes: el terreno del interior se ve limpio, sin velo. Se encharca en lo bajo, se retira en las tierras altas (el Relieve la recorta) y deja siempre despejado cada lugar con nombre.
 _Avoid_: niebla de guerra, fog, fog of war, fade del borde
-
-**Perspectiva aérea**:
-El velo cálido y sutil que aclara el terreno lejano y vela un poco los valles, dentro del Mapa. Forma un mismo continuo con la Bruma.
-_Avoid_: fog lineal, distance fog
