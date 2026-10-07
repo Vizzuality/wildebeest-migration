@@ -41,6 +41,10 @@ export function Overlay() {
           <a href="https://esa-worldcover.org/en/data-access" target="_blank" rel="noreferrer">
             © ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021)
           </a>{' '}
+          · verdor y quemas:{' '}
+          <a href="https://lpdaac.usgs.gov/products/mod13q1v061/" target="_blank" rel="noreferrer">
+            NASA MODIS (MOD13Q1, MCD64A1)
+          </a>{' '}
           · ríos:{' '}
           <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
             © OpenStreetMap contributors

@@ -1,6 +1,10 @@
 import * as THREE from 'three'
 import { MAP, RAIN_NORTH, RAIN_SOUTH } from '../geo'
 
+/** NDVI of savanna grass at its driest and at full flush, read off the baked Verdor. */
+export const NDVI_DRY = 0.3
+export const NDVI_LUSH = 0.62
+
 export const SUN_DIR = new THREE.Vector3(-0.62, 0.55, 0.56).normalize()
 
 /**
@@ -50,6 +54,10 @@ export const shared = {
   uRainS: { value: RAIN_SOUTH },
   uRainN: { value: RAIN_NORTH },
   uNoise2: { value: noiseTexture() },
+  uGrid: { value: new THREE.Vector2() },
+  uVerdor: { value: [] as THREE.DataTexture[] },
+  uQuemas: { value: null as THREE.DataTexture | null },
+  uQuemaMask: { value: null as THREE.DataTexture | null },
 }
 
 export const GLSL_COMMON = /* glsl */ `
@@ -62,6 +70,10 @@ uniform float uMapStep;
 uniform float uRainS[12];
 uniform float uRainN[12];
 uniform sampler2D uNoise2;
+uniform vec2 uGrid;
+uniform sampler2D uVerdor[3];
+uniform sampler2D uQuemas;
+uniform sampler2D uQuemaMask;
 
 vec3 srgb(vec3 c) { return pow(c, vec3(2.2)); }
 
@@ -93,7 +105,42 @@ float rainN(float month) {
 }
 float northness(float z) { return smoothstep(80.0, -110.0, z); }
 float rainAt(float z, float month) { return mix(rainS(month), rainN(month), northness(z)); }
-float greenness(float z, float month) { return smoothstep(0.0, 110.0, rainAt(z, month - 0.6)); }
+vec2 gridUv(vec2 xz) { return ((xz - uMapMin) / uMapStep + 0.5) / uGrid; }
+
+float verdorIn(vec2 uv, int month) {
+  int m = wrap12(month);
+  vec4 v = m < 4 ? texture2D(uVerdor[0], uv) : m < 8 ? texture2D(uVerdor[1], uv) : texture2D(uVerdor[2], uv);
+  int c = m - (m / 4) * 4;
+  return (c == 0 ? v.x : c == 1 ? v.y : c == 2 ? v.z : v.w) * (255.0 / 250.0);
+}
+
+// Verdor (NDVI) at a point now. Between one mid-month and the next each spot turns at its own
+// moment, set by \`order\` (0–1), so green spreads and recedes in patches instead of fading evenly.
+float verdor(vec2 xz, float order) {
+  float t = uMonth - 0.5;
+  float fi = floor(t);
+  int i = int(fi);
+  vec2 uv = gridUv(xz);
+  float p = smoothstep(order * 0.7, order * 0.7 + 0.3, t - fi);
+  return mix(verdorIn(uv, i), verdorIn(uv, i + 1), p);
+}
+
+// How green the grass reads (0 = straw, 1 = full flush) for an NDVI value.
+float greenOf(float ndvi) { return smoothstep(${NDVI_DRY.toFixed(3)}, ${NDVI_LUSH.toFixed(3)}, ndvi); }
+
+// Months since this spot's Quema (−1 if it does not burn). The fire front crosses the patch
+// over its month, so \`spread\` (0–1) says when it reaches this spot.
+float burnAge(vec2 xz, float spread) {
+  float m = texture2D(uQuemas, gridUv(xz)).r * 255.0;
+  if (m < 0.5) return -1.0;
+  return mod(uMonth - (m - 1.0) - spread * 0.9, 12.0);
+}
+
+// How much of this spot lies inside a Quema scar (0–1): the cell mask, traced along a ragged rim.
+float burnScar(vec2 xz, float rag) {
+  float mask = texture2D(uQuemaMask, gridUv(xz)).r;
+  return smoothstep(0.42 + rag * 0.3, 0.58 + rag * 0.3, mask);
+}
 
 // Simplex 2D noise (Ashima / Ian McEwan, MIT).
 vec3 permute3(vec3 x) { return mod(((x * 34.0) + 1.0) * x, 289.0); }

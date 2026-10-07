@@ -46,6 +46,14 @@ _Avoid_: tributario, arroyo, stream
 La proporción de árbol, matorral, hierba, suelo desnudo y humedal en cada punto del Mapa, derivada exclusivamente de un mapa de cobertura real, sin manchas añadidas a mano.
 _Avoid_: woodland, máscara de bosque, landcover
 
+**Verdor**:
+Lo verde que está la vegetación en cada punto del Mapa en cada mes de un año medio, medido por satélite, no simulado a partir de la lluvia. Cambia a manchas: cada sitio pasa de un mes al siguiente en su propio momento.
+_Avoid_: greenness, NDVI, verdor de la lluvia
+
+**Quema**:
+Una mancha de sabana que arde casi todos los años en su mes habitual. Queda negra, pasa a ceniza y, cuando llega el Verdor, rebrota más verde que lo de alrededor.
+_Avoid_: fuego, burn, incendio
+
 **Bosque de galería**:
 La franja de árboles densos que bordea los ríos. Es la Cobertura la que la define, no la distancia al cauce.
 _Avoid_: riparian, ribera

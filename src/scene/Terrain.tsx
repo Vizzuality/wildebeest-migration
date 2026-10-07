@@ -56,10 +56,11 @@ void main() {
   float lake = vMask.y;
   float fw = length(fwidth(xz));
 
-  float n1 = tnoise(xz * 0.08);
   float n2 = tnoise(xz * 0.35 + 3.0);
   float n3 = tnoise(xz * 2.2 - 7.0) * (1.0 - smoothstep(0.05, 0.2, fw));
-  float g = clamp(greenness(xz.y, uMonth) * (0.9 + 0.15 * n1), 0.0, 1.0);
+  // Which spots turn first when the Verdor changes month: patches a few km across.
+  float order = clamp(0.5 + 0.6 * (tnoise(xz * 0.5 + 11.0) * 0.6 + tnoise(xz * 2.4 - 3.0) * 0.4), 0.0, 1.0);
+  float g = greenOf(verdor(xz, order));
 
   // Hierba swings hardest with the rain: straw in the dry season, fresh green in the rains.
   vec3 straw = mix(srgb(vec3(0.78, 0.65, 0.42)), srgb(vec3(0.66, 0.53, 0.33)), 0.4 + 0.25 * n2);
@@ -72,6 +73,20 @@ void main() {
   float under = max(1.0 - tree, 1e-3);
   vec3 floorCol = (grassCol * grass + shrubCol * shrub + wetCol * wet + bareCol * bare) / under;
   if (grass + shrub + wet + bare < 1e-3) floorCol = grassCol;
+
+  // Quemas: black scar, greying to ash, then fresh shoots greener than the grass around.
+  // Bend the 300 m cells of the burn record so scars get the ragged outline of a real fire.
+  vec2 bent = xz + vec2(tnoise(xz * 0.9 + 3.0), tnoise(xz * 0.9 + 21.0)) * 0.6;
+  float age = burnAge(bent, order);
+  if (age >= 0.0 && age < 8.0) {
+    float rag = tnoise(xz * 1.7 + 5.0) * 0.6 + tnoise(xz * 5.3) * 0.4;
+    float scar = burnScar(bent, rag) * (grass + shrub) / under;
+    // Charred for a few weeks, then wind and new growth blur the scar back into the straw.
+    vec3 burnt = mix(srgb(vec3(0.10, 0.09, 0.08)), srgb(vec3(0.36, 0.33, 0.29)), smoothstep(0.1, 1.2, age));
+    float fresh = 0.85 * (1.0 - smoothstep(0.6, 3.5, age)) * (1.0 - g);
+    floorCol = mix(floorCol, burnt, scar * fresh);
+    floorCol = mix(floorCol, srgb(vec3(0.30, 0.48, 0.16)), scar * g * 0.4 * (1.0 - smoothstep(4.0, 8.0, age)));
+  }
 
   // Dense canopy (galería, highland forest) stays evergreen; open acacia yellows a little when dry.
   float dense = smoothstep(0.35, 0.8, tree);

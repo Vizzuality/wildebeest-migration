@@ -107,6 +107,7 @@ varying vec3 vWorld;
 varying float vCrown;
 varying float vShade;
 varying float vTone;
+varying float vGreen;
 void main() {
   vec3 origin = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
   float fade = 1.0 - smoothstep(${FADE_START.toFixed(1)}, ${FADE_END.toFixed(1)}, distance(cameraPosition, origin));
@@ -116,6 +117,7 @@ void main() {
   vCrown = aCrown;
   vShade = aShade;
   vTone = hash12(origin.xz);
+  vGreen = greenOf(verdor(origin.xz, 0.5));
   vec4 mvPosition = viewMatrix * world;
   gl_Position = projectionMatrix * mvPosition;
 }
@@ -131,8 +133,9 @@ varying vec3 vWorld;
 varying float vCrown;
 varying float vShade;
 varying float vTone;
+varying float vGreen;
 void main() {
-  float g = greenness(vWorld.z, uMonth) * uSeasonal + (1.0 - uSeasonal);
+  float g = vGreen * uSeasonal + (1.0 - uSeasonal);
   vec3 leaf = mix(uDry, uGreen, g) * (0.85 + 0.3 * vTone);
   vec3 col = mix(srgb(vec3(0.30, 0.23, 0.16)), leaf, vCrown) * vShade;
   vec3 N = normalize(vNormal);

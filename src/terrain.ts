@@ -57,11 +57,13 @@ async function fetchOk(url: string) {
 }
 
 async function fetchHeightfield(): Promise<Heightfield> {
-  const [meta, elevation, rawMasks, rawCover] = await Promise.all([
+  const [meta, elevation, rawMasks, rawCover, rawVerdor, rawQuemas] = await Promise.all([
     fetchOk('/terrain/terrain.json').then((r) => r.json() as Promise<TerrainMeta>),
     fetchOk('/terrain/elevation.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/masks.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/cover.bin').then((r) => r.arrayBuffer()),
+    fetchOk('/terrain/verdor.bin').then((r) => r.arrayBuffer()),
+    fetchOk('/terrain/quemas.bin').then((r) => r.arrayBuffer()),
   ])
   if (meta.minX !== MAP.minX || meta.minZ !== MAP.minZ) throw new Error('terrain bake does not match MAP, run pnpm bake:terrain')
 
@@ -83,6 +85,10 @@ async function fetchHeightfield(): Promise<Heightfield> {
   tex.needsUpdate = true
   shared.uHeight.value = tex
   shared.uMapStep.value = step
+  shared.uGrid.value.set(nx, nz)
+  shared.uVerdor.value = verdorTextures(new Uint8Array(rawVerdor), nx, nz)
+  shared.uQuemas.value = quemasTexture(new Uint8Array(rawQuemas), nx, nz)
+  shared.uQuemaMask.value = quemaMaskTexture(new Uint8Array(rawQuemas), nx, nz)
 
   const hf = { nx, nz, step, heights, cover, masks }
   return {
@@ -90,6 +96,39 @@ async function fetchHeightfield(): Promise<Heightfield> {
     rivers: meta.rivers.flatMap((r) => r.lines.map((points) => ({ name: r.name, kind: r.kind, points }))),
     heightAt: makeSampler(hf),
   }
+}
+
+/** Twelve months of Verdor per cell, split across three RGBA textures (four months each). */
+function verdorTextures(verdor: Uint8Array, nx: number, nz: number) {
+  return [0, 1, 2].map((k) => {
+    const data = new Uint8Array(nx * nz * 4)
+    for (let i = 0; i < nx * nz; i++) for (let c = 0; c < 4; c++) data[i * 4 + c] = verdor[i * 12 + k * 4 + c]
+    const tex = new THREE.DataTexture(data, nx, nz, THREE.RGBAFormat)
+    tex.minFilter = THREE.LinearFilter
+    tex.magFilter = THREE.LinearFilter
+    tex.needsUpdate = true
+    return tex
+  })
+}
+
+/** Usual month of each cell's Quema (1–12, 0 = none). Nearest filtering: months don't blend. */
+function quemasTexture(quemas: Uint8Array, nx: number, nz: number) {
+  const tex = new THREE.DataTexture(quemas, nx, nz, THREE.RedFormat)
+  tex.minFilter = THREE.NearestFilter
+  tex.magFilter = THREE.NearestFilter
+  tex.unpackAlignment = 1
+  tex.needsUpdate = true
+  return tex
+}
+
+/** Burns at all (0/1), filtered, so scar edges can be traced smoothly between cells. */
+function quemaMaskTexture(quemas: Uint8Array, nx: number, nz: number) {
+  const tex = new THREE.DataTexture(quemas.map((m) => (m ? 255 : 0)), nx, nz, THREE.RedFormat)
+  tex.minFilter = THREE.LinearFilter
+  tex.magFilter = THREE.LinearFilter
+  tex.unpackAlignment = 1
+  tex.needsUpdate = true
+  return tex
 }
 
 function makeSampler(hf: Pick<Heightfield, 'nx' | 'nz' | 'step' | 'heights'>) {

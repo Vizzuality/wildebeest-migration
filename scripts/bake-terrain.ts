@@ -5,6 +5,8 @@
 // Elevation: AWS Terrain Tiles (Terrarium encoding), averaged onto the grid.
 // Rivers: OpenStreetMap waterways, via the Overpass API.
 // Cobertura: ESA WorldCover 10 m (2021), read as windows straight from its public COGs.
+// Verdor: MODIS MOD13Q1/MYD13Q1 NDVI (250 m), averaged per calendar month over several years.
+// Quemas: MODIS MCD64A1 burned area (500 m). Both from Microsoft Planetary Computer.
 // Downloads are cached in .cache/terrain so re-runs are offline.
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -57,6 +59,13 @@ const WORLDCOVER_LEVEL = 1
 /** Channels of cover.bin. Grassland, cropland and anything unlisted count as hierba. */
 const COVER: Record<number, number> = { 10: 0, 20: 1, 90: 2, 95: 2, 50: 3, 60: 3 }
 const WATER = 80
+
+const PC = 'https://planetarycomputer.microsoft.com/api'
+/** Years averaged into the Verdor and scanned for Quemas. */
+const YEARS = [2019, 2024]
+/** A cell gets a Quema in its usual month if it burned in at least this many of those years. */
+const BURN_YEARS = 3
+const MODIS_R = 6371007.181
 
 const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter']
 
@@ -222,6 +231,172 @@ async function loadCover() {
   return Buffer.from(cover.buffer)
 }
 
+async function pcToken() {
+  const res = await fetch(`${PC}/sas/v1/token/modiseuwest/modis-061-cogs`)
+  if (!res.ok) throw new Error(`planetary computer token: ${res.status}`)
+  return ((await res.json()) as { token: string }).token
+}
+
+interface StacItem {
+  id: string
+  properties: { start_datetime: string }
+  assets: Record<string, { href: string }>
+}
+
+async function stacItems(collection: string): Promise<StacItem[]> {
+  const [west, north] = unproject(MAP.minX, MAP.minZ)
+  const [east, south] = unproject(MAP.maxX, MAP.maxZ)
+  const buf = await cached(`stac-${collection}-${YEARS.join('-')}.json`, async () => {
+    const items: StacItem[] = []
+    let body: object | null = {
+      collections: [collection],
+      bbox: [west, south, east, north],
+      datetime: `${YEARS[0]}-01-01T00:00:00Z/${YEARS[1]}-12-31T23:59:59Z`,
+      limit: 250,
+    }
+    while (body) {
+      const res = await retry(() => fetch(`${PC}/stac/v1/search`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
+      const page = (await res.json()) as { features: StacItem[]; links: { rel: string; body?: object }[] }
+      items.push(...page.features)
+      body = page.links.find((l) => l.rel === 'next')?.body ?? null
+    }
+    return Buffer.from(JSON.stringify(items))
+  })
+  return JSON.parse(buf.toString())
+}
+
+/**
+ * For each grid cell, the index of its nearest pixel in a MODIS sinusoidal raster window, so
+ * every date of the same tile and resolution is sampled without reprojecting again.
+ */
+async function modisLookup(href: string) {
+  const image = await (await fromUrl(href)).getImage()
+  const [ox, oy] = image.getOrigin()
+  const [rx, ry] = image.getResolution()
+  const col = new Float64Array(nx * nz)
+  const row = new Float64Array(nx * nz)
+  for (let iz = 0; iz < nz; iz++) {
+    for (let ix = 0; ix < nx; ix++) {
+      const [lon, lat] = unproject(MAP.minX + ix * STEP, MAP.minZ + iz * STEP)
+      const phi = (lat * Math.PI) / 180
+      const x = MODIS_R * ((lon * Math.PI) / 180) * Math.cos(phi)
+      const y = MODIS_R * phi
+      col[iz * nx + ix] = Math.floor((x - ox) / rx)
+      row[iz * nx + ix] = Math.floor((y - oy) / ry)
+    }
+  }
+  let c0 = Infinity, c1 = -Infinity, r0 = Infinity, r1 = -Infinity
+  for (let i = 0; i < col.length; i++) {
+    c0 = Math.min(c0, col[i]); c1 = Math.max(c1, col[i])
+    r0 = Math.min(r0, row[i]); r1 = Math.max(r1, row[i])
+  }
+  const w = c1 - c0 + 1
+  const index = new Uint32Array(nx * nz)
+  for (let i = 0; i < index.length; i++) index[i] = (row[i] - r0) * w + (col[i] - c0)
+  return { window: [c0, r0, c1 + 1, r1 + 1], index }
+}
+
+async function readBand(href: string, window: number[]) {
+  const image = await (await fromUrl(href)).getImage()
+  const [band] = (await image.readRasters({ window })) as unknown as Int16Array[]
+  return band
+}
+
+async function pool<T>(items: T[], size: number, work: (item: T, i: number) => Promise<void>) {
+  let next = 0
+  await Promise.all(Array.from({ length: size }, async () => {
+    while (next < items.length) {
+      const i = next++
+      await work(items[i], i)
+    }
+  }))
+}
+
+/**
+ * Verdor: mean NDVI per cell and calendar month over YEARS, from 16-day composites (Terra and
+ * Aqua, 8 days apart) keeping only good or marginal pixels. Months that clouds left without a
+ * single good pixel take the neighbouring months' values. Stored 0–250 for NDVI 0–1.
+ */
+async function loadVerdor() {
+  const items = await stacItems('modis-13Q1-061')
+  let token = await pcToken()
+  const sign = (href: string) => `${href}?${token}`
+  const { window, index } = await modisLookup(sign(items[0].assets['250m_16_days_NDVI'].href))
+  console.log(`verdor: ${items.length} composites, window ${window[2] - window[0]}×${window[3] - window[1]} px`)
+  const sum = new Float32Array(nx * nz * 12)
+  const count = new Uint16Array(nx * nz * 12)
+  let done = 0
+  await pool(items, 8, async (item) => {
+    const grid = await cached(`ndvi-${item.id}-${STEP}.bin`, () =>
+      retry(async (attempt) => {
+        if (attempt > 0) token = await pcToken()
+        const [ndvi, rel] = await Promise.all([
+          readBand(sign(item.assets['250m_16_days_NDVI'].href), window),
+          readBand(sign(item.assets['250m_16_days_pixel_reliability'].href), window),
+        ])
+        const out = new Uint8Array(nx * nz).fill(255)
+        for (let i = 0; i < out.length; i++) {
+          const k = index[i]
+          if (rel[k] === 0 || rel[k] === 1) out[i] = Math.round(Math.min(1, Math.max(0, ndvi[k] / 10000)) * 250)
+        }
+        return Buffer.from(out.buffer)
+      }),
+    )
+    const mid = new Date(Date.parse(item.properties.start_datetime) + 8 * 86_400_000)
+    const m = mid.getUTCMonth()
+    for (let i = 0; i < nx * nz; i++) {
+      if (grid[i] === 255) continue
+      sum[i * 12 + m] += grid[i]
+      count[i * 12 + m]++
+    }
+    if (++done % 20 === 0) console.log(`  ${done}/${items.length}`)
+  })
+  const out = new Uint8Array(nx * nz * 12)
+  const month = new Float32Array(12)
+  for (let i = 0; i < nx * nz; i++) {
+    for (let m = 0; m < 12; m++) month[m] = count[i * 12 + m] ? sum[i * 12 + m] / count[i * 12 + m] : -1
+    for (let m = 0; m < 12; m++) {
+      let v = month[m]
+      for (let d = 1; v < 0 && d < 6; d++) {
+        const a = month[(m + 12 - d) % 12]
+        const b = month[(m + d) % 12]
+        v = a >= 0 && b >= 0 ? (a + b) / 2 : Math.max(a, b)
+      }
+      out[i * 12 + m] = Math.round(Math.max(0, v))
+    }
+  }
+  return Buffer.from(out.buffer)
+}
+
+/**
+ * Quemas: for each cell, the calendar month it usually burns (1–12), if it burned in at least
+ * BURN_YEARS of YEARS; 0 otherwise.
+ */
+async function loadQuemas() {
+  const items = await stacItems('modis-64A1-061')
+  const token = await pcToken()
+  const sign = (href: string) => `${href}?${token}`
+  const { window, index } = await modisLookup(sign(items[0].assets.Burn_Date.href))
+  console.log(`quemas: ${items.length} months`)
+  const counts = new Uint8Array(nx * nz * 12)
+  await pool(items, 8, async (item) => {
+    const burn = await retry(() => readBand(sign(item.assets.Burn_Date.href), window))
+    const m = new Date(item.properties.start_datetime).getUTCMonth()
+    for (let i = 0; i < nx * nz; i++) if (burn[index[i]] > 0) counts[i * 12 + m]++
+  })
+  const out = new Uint8Array(nx * nz)
+  for (let i = 0; i < nx * nz; i++) {
+    let total = 0
+    let best = 0
+    for (let m = 0; m < 12; m++) {
+      total += counts[i * 12 + m]
+      if (counts[i * 12 + m] > counts[i * 12 + best]) best = m
+    }
+    if (total >= BURN_YEARS) out[i] = best + 1
+  }
+  return Buffer.from(out.buffer)
+}
+
 function lakeMask(elev: Float32Array) {
   const mask = new Uint8Array(nx * nz)
   for (const { name, level, margin = LAKE_MARGIN, seeds } of LAKES) {
@@ -363,6 +538,8 @@ const rivers = RIVERS.map((r) => {
   return { name: r.name, kind: r.kind, lines }
 })
 const dist = riverDistance(rivers.flatMap((r) => r.lines))
+const verdor = await cached(`verdor-${YEARS.join('-')}-${STEP}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, loadVerdor)
+const quemas = await cached(`quemas-${YEARS.join('-')}-${BURN_YEARS}-${STEP}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, loadQuemas)
 const cover = await cached(`worldcover-${WORLDCOVER_LEVEL}-${STEP}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, loadCover)
 
 // Elevation in decimetres so 1 m steps never show up as terraces on the plains.
@@ -378,6 +555,8 @@ for (let i = 0; i < nx * nz; i++) {
 await writeFile(`${OUT}/elevation.bin`, dm)
 await writeFile(`${OUT}/masks.bin`, masks)
 await writeFile(`${OUT}/cover.bin`, cover)
+await writeFile(`${OUT}/verdor.bin`, verdor)
+await writeFile(`${OUT}/quemas.bin`, quemas)
 await writeFile(
   `${OUT}/terrain.json`,
   JSON.stringify({ nx, nz, step: STEP, minX: MAP.minX, minZ: MAP.minZ, base: BASE, riverMax: RIVER_MAX, rivers }),
@@ -394,4 +573,6 @@ console.log(`elevation ${lo.toFixed(0)}–${hi.toFixed(0)} m, Cota base ${BASE} 
 const share = [0, 0, 0, 0]
 for (let i = 0; i < cover.length; i++) share[i % 4] += cover[i] / 255 / (nx * nz)
 console.log(`cobertura: árbol ${(share[0] * 100).toFixed(1)}%, matorral ${(share[1] * 100).toFixed(1)}%, humedal ${(share[2] * 100).toFixed(1)}%, desnudo ${(share[3] * 100).toFixed(1)}%`)
+const burnt = quemas.reduce((n, v) => n + (v ? 1 : 0), 0)
+console.log(`quemas: ${((burnt / (nx * nz)) * 100).toFixed(1)}% of the Mapa burns most years`)
 for (const r of rivers) console.log(`  ${r.name}: ${r.lines.length} line(s), ${r.lines.reduce((s, l) => s + l.length, 0)} points`)
