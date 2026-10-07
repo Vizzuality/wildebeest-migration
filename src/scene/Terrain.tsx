@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import * as THREE from 'three'
-import { LAT0, LON0, MAP } from '../geo'
+import { LAT0, LON0, MAP, project } from '../geo'
 import { GLSL_COMMON, shared } from '../shaders/common'
-import { HF, NGORO_XZ } from '../terrain'
+import { useHeightfield, type Heightfield } from '../terrain'
 import { HORIZON } from './Sky'
 
 const vertex = /* glsl */ `
@@ -26,6 +26,7 @@ void main() {
 const fragment = /* glsl */ `
 ${GLSL_COMMON}
 uniform vec2 uCrater;
+uniform vec2 uCraterLake;
 uniform vec2 uMapMax;
 varying vec3 vWorld;
 varying vec3 vNormal;
@@ -65,10 +66,10 @@ void main() {
   float steep = smoothstep(0.86, 0.62, N.y);
   col = mix(col, rock, steep * 0.8);
 
-  // Ngorongoro crater floor and its soda lake.
+  // Ngorongoro crater floor and Lake Magadi, its soda lake.
   float dC = distance(xz, uCrater);
-  col = mix(col, mix(grass, lush, 0.4), smoothstep(6.0, 4.0, dC) * 0.7);
-  col = mix(col, srgb(vec3(0.86, 0.80, 0.78)), smoothstep(1.6, 1.2, distance(xz, uCrater + vec2(0.8, 1.0))));
+  col = mix(col, mix(grass, lush, 0.4), smoothstep(9.0, 7.0, dC) * 0.7);
+  col = mix(col, srgb(vec3(0.86, 0.80, 0.78)), smoothstep(2.0, 1.5, distance(xz, uCraterLake)));
 
   // Riparian (gallery) forest along the rivers.
   col = mix(col, srgb(vec3(0.16, 0.30, 0.12)), (1.0 - smoothstep(0.8, 2.6, riverD)) * 0.85);
@@ -107,8 +108,11 @@ void main() {
 }
 `
 
-function buildGeometry() {
-  const { nx, nz, step, heights, masks } = HF
+// Real coordinates: centre of the crater floor, and Lake Magadi from OpenStreetMap.
+const CRATER = project([35.575, -3.18])
+const CRATER_LAKE = project([35.536, -3.193])
+
+function buildGeometry({ nx, nz, step, heights, masks }: Heightfield) {
   const pos = new Float32Array(nx * nz * 3)
   for (let iz = 0; iz < nz; iz++) {
     for (let ix = 0; ix < nx; ix++) {
@@ -140,7 +144,8 @@ function buildGeometry() {
 }
 
 export function Terrain() {
-  const geometry = useMemo(() => buildGeometry(), [])
+  const hf = useHeightfield()
+  const geometry = useMemo(() => buildGeometry(hf), [hf])
   const material = useMemo(
     () =>
       new THREE.ShaderMaterial({
@@ -149,7 +154,8 @@ export function Terrain() {
         uniforms: {
           ...shared,
           ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
-          uCrater: { value: new THREE.Vector2(NGORO_XZ[0], NGORO_XZ[1]) },
+          uCrater: { value: new THREE.Vector2(...CRATER) },
+          uCraterLake: { value: new THREE.Vector2(...CRATER_LAKE) },
           uMapMax: { value: new THREE.Vector2(MAP.maxX, MAP.maxZ) },
         },
         fog: true,

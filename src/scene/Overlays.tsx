@@ -1,23 +1,27 @@
 import { Html, Line } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { useMemo, useRef } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { HOTSPOTS, LOOP_SAMPLES, MAP, MONTHS_SHORT, PLACES, borderLat, herdPos, project } from '../geo'
 import { useStore } from '../store'
-import { heightAt } from '../terrain'
+import { snapToRiver, useHeightfield } from '../terrain'
 
-const lift = (x: number, z: number, h = 0.6) => new THREE.Vector3(x, heightAt(x, z) + h, z)
+function useLift() {
+  const { heightAt } = useHeightfield()
+  return useCallback((x: number, z: number, h = 0.6) => new THREE.Vector3(x, heightAt(x, z) + h, z), [heightAt])
+}
 
 export function Route() {
   const show = useStore((s) => s.showRoute)
-  const points = useMemo(() => LOOP_SAMPLES.filter((_, i) => i % 4 === 0).map(([x, z]) => lift(x, z, 1.2)), [])
+  const lift = useLift()
+  const points = useMemo(() => LOOP_SAMPLES.filter((_, i) => i % 4 === 0).map(([x, z]) => lift(x, z, 1.2)), [lift])
   const ticks = useMemo(
     () =>
       MONTHS_SHORT.map((label, i) => {
         const [x, z] = herdPos(i + 0.5)
         return { label, pos: lift(x, z, 1.2) }
       }),
-    [],
+    [lift],
   )
   if (!show) return null
   return (
@@ -39,23 +43,26 @@ export function Route() {
 }
 
 export function Border() {
+  const lift = useLift()
   const points = useMemo(() => {
     const out: THREE.Vector3[] = []
-    for (let lon = 33.9; lon <= 35.8; lon += 0.01) {
+    for (let lon = 33.4; lon <= 35.8; lon += 0.01) {
       const [x, z] = project([lon, borderLat(lon)])
       if (x < MAP.minX || x > MAP.maxX || z < MAP.minZ || z > MAP.maxZ) continue
       out.push(lift(x, z, 0.5))
     }
     return out
-  }, [])
+  }, [lift])
   return <Line points={points} color="#ffffff" lineWidth={1} dashed dashSize={1.2} gapSize={1.2} transparent opacity={0.55} />
 }
 
 export function Labels() {
+  const { rivers } = useHeightfield()
+  const lift = useLift()
   return (
     <group>
       {PLACES.map((p) => {
-        const [x, z] = project(p.at)
+        const [x, z] = p.river ? snapToRiver(rivers, p.river, ...project(p.at)) : project(p.at)
         return (
           <Html key={p.name} center position={lift(x, z, p.kind === 'country' ? 3 : 1.5)} className={`label ${p.kind ?? 'place'}`} zIndexRange={[5, 0]}>
             {p.kind ? null : <i />}
@@ -67,9 +74,11 @@ export function Labels() {
   )
 }
 
-function Hotspot({ name, at, months }: (typeof HOTSPOTS)[number]) {
-  const [x, z] = project(at)
-  const pos = useMemo(() => lift(x, z, 1.5), [x, z])
+function Hotspot({ name, at, river, months }: (typeof HOTSPOTS)[number]) {
+  const { rivers } = useHeightfield()
+  const lift = useLift()
+  const [x, z] = useMemo(() => snapToRiver(rivers, river, ...project(at)), [rivers, river, at])
+  const pos = useMemo(() => lift(x, z, 1.5), [lift, x, z])
   const rings = useRef<THREE.Group>(null)
   const label = useRef<HTMLDivElement>(null)
 
@@ -119,6 +128,7 @@ export function Hotspots() {
 
 /** A soft beacon floating over the herd's centre of mass. */
 export function HerdMarker() {
+  const { heightAt } = useHeightfield()
   const ref = useRef<THREE.Group>(null)
   useFrame(() => {
     const [x, z] = herdPos(useStore.getState().month)

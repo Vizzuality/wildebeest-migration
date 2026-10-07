@@ -93,6 +93,7 @@ body { font-family: var(--sans); color: var(--ink); -webkit-font-smoothing: anti
 .controls button:focus-visible, .controls select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .foot { position: absolute; left: 32px; right: 32px; bottom: 30px; pointer-events: none; font-size: 11px; color: var(--ink-faint); display: none; }
+.foot a { color: var(--ink-dim); pointer-events: auto; }
 
 /* In-scene labels */
 .label { font-size: 11px; font-weight: 500; color: var(--ink); white-space: nowrap; text-shadow: 0 1px 4px rgba(0,0,0,.8), 0 0 12px rgba(0,0,0,.4); pointer-events: none; user-select: none; display: flex; align-items: center; gap: 5px; }
@@ -128,3 +129,9 @@ body { font-family: var(--sans); color: var(--ink); -webkit-font-smoothing: anti
 @media (prefers-reduced-motion: reduce) {
   .story, .herd-tag span { animation: none; }
 }
+
+.curtain { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #e9c79c; color: #3a2d1f; font-family: var(--serif); font-size: 22px; }
+.curtain p { margin: 0; }
+.curtain.leaving { pointer-events: none; animation: curtain-out .9s ease-out .15s forwards; }
+.curtain button { font: 600 13px var(--sans); color: #3a2d1f; background: rgba(255,255,255,.4); border: 1px solid rgba(58,45,31,.3); border-radius: 999px; padding: 8px 18px; cursor: pointer; }
+@keyframes curtain-out { to { opacity: 0; visibility: hidden; } }

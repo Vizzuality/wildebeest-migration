@@ -2,14 +2,17 @@ import { OrbitControls } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useRef, type ComponentRef } from 'react'
 import * as THREE from 'three'
-import { herdPos } from '../geo'
+import { MAP, herdPos } from '../geo'
 import { useStore } from '../store'
-import { heightAt } from '../terrain'
+import { useHeightfield } from '../terrain'
 
 const OFFSET = new THREE.Vector3(-55, 85, 125)
 const INTRO_SECONDS = 5
+// High above the middle of the Mapa, where the opening fly-in starts.
+export const INTRO_FROM = new THREE.Vector3((MAP.minX + MAP.maxX) / 2, 440, (MAP.minZ + MAP.maxZ) / 2 + 270)
 
 export function CameraRig() {
+  const { heightAt } = useHeightfield()
   const controls = useRef<ComponentRef<typeof OrbitControls>>(null)
   const camera = useThree((s) => s.camera)
   const target = useRef(new THREE.Vector3())
@@ -34,9 +37,8 @@ export function CameraRig() {
     // Opening fly-in from high above the whole ecosystem.
     if (elapsed.current < INTRO_SECONDS) {
       const t = THREE.MathUtils.smootherstep(elapsed.current / INTRO_SECONDS, 0, 1)
-      const from = new THREE.Vector3(0, 420, 260)
       const to = c.target.clone().add(OFFSET)
-      camera.position.lerpVectors(from, to, t)
+      camera.position.lerpVectors(INTRO_FROM, to, t)
     }
     c.update()
   })

@@ -1,16 +1,7 @@
 import * as THREE from 'three'
 import { DISPERSE, MAP, RAIN_NORTH, RAIN_SOUTH, ROUTE_XZ, SPREAD } from '../geo'
-import { HF } from '../terrain'
 
 export const SUN_DIR = new THREE.Vector3(-0.62, 0.55, 0.56).normalize()
-
-export const heightTexture = (() => {
-  const tex = new THREE.DataTexture(HF.heights, HF.nx, HF.nz, THREE.RedFormat, THREE.FloatType)
-  tex.minFilter = THREE.NearestFilter
-  tex.magFilter = THREE.NearestFilter
-  tex.needsUpdate = true
-  return tex
-})()
 
 /** Uniforms shared (by reference) across every material in the scene. */
 export const shared = {
@@ -18,9 +9,10 @@ export const shared = {
   uClock: { value: 0 },
   uMoving: { value: 1 },
   uSunDir: { value: SUN_DIR },
-  uHeight: { value: heightTexture },
+  // Filled in by loadHeightfield() before anything that samples them renders.
+  uHeight: { value: null as THREE.DataTexture | null },
   uMapMin: { value: new THREE.Vector2(MAP.minX, MAP.minZ) },
-  uMapStep: { value: HF.step },
+  uMapStep: { value: 0 },
   uPath: { value: ROUTE_XZ.map(([x, z]) => new THREE.Vector2(x, z)) },
   uSpread: { value: SPREAD },
   uDisperse: { value: DISPERSE },

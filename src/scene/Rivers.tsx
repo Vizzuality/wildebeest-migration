@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import * as THREE from 'three'
 import { GLSL_COMMON, shared } from '../shaders/common'
-import { RIVER_LINES, heightAt } from '../terrain'
+import { useHeightfield, type RiverLine } from '../terrain'
 
 const vertex = /* glsl */ `
 varying vec2 vUv;
@@ -33,7 +33,7 @@ void main() {
 }
 `
 
-function ribbon(points: [number, number][], width: number) {
+function ribbon(points: [number, number][], width: number, heightAt: (x: number, z: number) => number) {
   const pos: number[] = []
   const uv: number[] = []
   const idx: number[] = []
@@ -63,11 +63,14 @@ function ribbon(points: [number, number][], width: number) {
   return g
 }
 
+function width({ name, kind }: RiverLine) {
+  if (kind === 'tributary') return 0.3
+  return name === 'Mara' ? 0.75 : 0.5
+}
+
 export function Rivers() {
-  const geometries = useMemo(
-    () => RIVER_LINES.map((r) => ribbon(r.points, r.name === 'Mara' ? 0.75 : 0.5)),
-    [],
-  )
+  const { rivers, heightAt } = useHeightfield()
+  const geometries = useMemo(() => rivers.map((r) => ribbon(r.points, width(r), heightAt)), [rivers, heightAt])
   const material = useMemo(
     () =>
       new THREE.ShaderMaterial({

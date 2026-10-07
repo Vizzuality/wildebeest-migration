@@ -103,7 +103,16 @@ export function Overlay() {
       </nav>
 
       <footer className="foot">
-        1 figura ≈ {perFigure} ñus · escala de animales y relieve exageradas · ruta y lluvias aproximadas
+        <span>
+          1 figura ≈ {perFigure} ñus · escala de animales y relieve exageradas · ruta y lluvias aproximadas · relieve:{' '}
+          <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noreferrer">
+            AWS Terrain Tiles
+          </a>{' '}
+          · ríos:{' '}
+          <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
+            © OpenStreetMap contributors
+          </a>
+        </span>
         <span className="hint">Arrastra para orbitar · rueda para zoom · espacio para pausar</span>
       </footer>
     </div>

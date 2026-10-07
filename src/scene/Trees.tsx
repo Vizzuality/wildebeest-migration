@@ -2,7 +2,7 @@ import { useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { MAP } from '../geo'
-import { HF, heightAt, mulberry32, woodland } from '../terrain'
+import { mulberry32, useHeightfield, woodland, type Heightfield } from '../terrain'
 
 // Flat-topped acacia: thin trunk, wide umbrella canopy.
 function acacia() {
@@ -21,16 +21,17 @@ function acacia() {
   return mergeGeometries([tint(trunk, '#4b3a2a'), tint(canopy, '#6e7a35')])!
 }
 
-function riverDistAt(x: number, z: number) {
-  const ix = Math.round((x - MAP.minX) / HF.step)
-  const iz = Math.round((z - MAP.minZ) / HF.step)
-  const i = iz * HF.nx + ix
-  return { river: HF.masks[i * 3 + 1], lake: HF.masks[i * 3 + 2] }
+function riverDistAt(hf: Heightfield, x: number, z: number) {
+  const ix = Math.round((x - MAP.minX) / hf.step)
+  const iz = Math.round((z - MAP.minZ) / hf.step)
+  const i = iz * hf.nx + ix
+  return { river: hf.masks[i * 3 + 1], lake: hf.masks[i * 3 + 2] }
 }
 
-export function Trees({ count = 14000 }: { count?: number }) {
+export function Trees({ count = 27000 }: { count?: number }) {
   const ref = useRef<THREE.InstancedMesh>(null)
   const geometry = useMemo(() => acacia(), [])
+  const hf = useHeightfield()
 
   const transforms = useMemo(() => {
     const rnd = mulberry32(99)
@@ -42,7 +43,7 @@ export function Trees({ count = 14000 }: { count?: number }) {
       tries++
       const x = MAP.minX + rnd() * (MAP.maxX - MAP.minX)
       const z = MAP.minZ + rnd() * (MAP.maxZ - MAP.minZ)
-      const { river, lake } = riverDistAt(x, z)
+      const { river, lake } = riverDistAt(hf, x, z)
       if (lake > 0.1 || river < 0.9) continue
       const p = Math.max(woodland(x, z) * 0.55, river < 3.2 ? 0.9 : 0)
       if (rnd() > p) continue
@@ -50,14 +51,14 @@ export function Trees({ count = 14000 }: { count?: number }) {
       e.set((rnd() - 0.5) * 0.1, rnd() * Math.PI * 2, (rnd() - 0.5) * 0.1)
       q.setFromEuler(e)
       const m = new THREE.Matrix4().compose(
-        new THREE.Vector3(x, heightAt(x, z) - 0.05, z),
+        new THREE.Vector3(x, hf.heightAt(x, z) - 0.05, z),
         q,
         new THREE.Vector3(s, s * (0.8 + rnd() * 0.5), s),
       )
       out.push(m)
     }
     return out
-  }, [count])
+  }, [count, hf])
 
   useLayoutEffect(() => {
     const mesh = ref.current!
