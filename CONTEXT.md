@@ -37,7 +37,7 @@ Uno de los tres ríos que estructuran la migración: Mara, Grumeti y Mbalageti. 
 _Avoid_: river, cauce
 
 **Afluente**:
-Un río real con nombre que se muestra por contexto (Orangi, Seronera, Sand River, Talek, Olare Orok, Oldupai), con menos peso visual que un Río principal.
+Un río real con nombre que se muestra por contexto (Orangi, Seronera, Sand River, Talek, Olare Orok, Oldupai), con menos peso visual que un Río principal. La Manada lo vadea por cualquier sitio.
 _Avoid_: tributario, arroyo, stream
 
 **Caudal**:
@@ -53,7 +53,7 @@ Charca suelta que queda en el Lecho cuando el Caudal ya no da para un hilo conti
 _Avoid_: charco, pool, waterhole
 
 **Cruce**:
-Un tramo concreto de un Río principal por el que la manada lo atraviesa en una ventana de meses conocida (el Mara entre julio y octubre, el Grumeti en junio y julio). Pertenece a la migración, no al río.
+Un tramo de un Río principal que la Manada atraviesa a menudo según los collares: el del Mara se concentra en torno a Kogatende, mientras el Grumeti y el Mbalageti se cruzan casi a lo largo de todo su curso. Un río puede tener varios; fuera de ellos la Manada no lo atraviesa. Cuándo se cruza lo decide la Presencia. Pertenece a la migración, no al río.
 _Avoid_: vado, crossing, paso
 
 ### Vegetación
@@ -83,3 +83,25 @@ _Avoid_: árbol, tree, instancia
 **Bruma**:
 Masa de calima cálida y volumétrica que envuelve el Mapa en un óvalo irregular, con lenguas que entran desde el borde. Solo existe hacia los bordes: el terreno del interior se ve limpio, sin velo. Se encharca en lo bajo, se retira en las tierras altas (el Relieve la recorta) y deja siempre despejado cada lugar con nombre.
 _Avoid_: niebla de guerra, fog, fog of war, fade del borde
+
+### Fauna
+
+**Manada**:
+Los animales que migran juntos por el ciclo anual: ñus, cebras y gacelas de Thomson (los elands, pocos, se dejan fuera). A escala de Mapa se ve como una sola Mancha. No incluye a los Residentes.
+_Avoid_: herd, rebaño, migración, animales
+
+**Residente**:
+Un animal que vive todo el año en la misma zona y no sigue a la Manada: jirafa en las acacias, elefante en el Bosque de galería y el bosque del norte, búfalo donde hay agua y hierba alta, hipopótamo en los Ríos principales y las Pozas. Los hipopótamos se reparten por su río cuando hay Caudal y se apiñan en las Pozas cuando no.
+_Avoid_: fauna local, animales de fondo
+
+**Recorrido**:
+La sucesión de lugares con nombre y fechas por la que pasa el centro de la Manada a lo largo del año: Ndutu (enero a mediados de marzo), Kopjes de Moru (abril), Seronera (mayo), Corredor occidental (junio), Kogatende (julio), Masái Mara (agosto y septiembre), Kogatende (octubre), Lobo (noviembre) y de vuelta por Seronera a Ndutu (diciembre). Los lugares y las fechas se marcan a mano, como lo cuentan las fuentes; entre un lugar y el siguiente sigue el paso fácil por el Relieve y cruza los Ríos principales solo por sus Cruces.
+_Avoid_: ruta, trayectoria, path
+
+**Presencia**:
+Cuánto se extiende la Manada en cada mes y en qué dirección se alarga, derivado exclusivamente de collares GPS de ñus de varios años. Da el tamaño y la orientación de la Manada alrededor del Recorrido, no su posición. Cebras y gacelas toman la de los ñus.
+_Avoid_: densidad, heatmap, extensión
+
+**Mancha**:
+La forma en que se ve la Manada a escala de Mapa: un único líquido espeso, como barro, siempre de una pieza, que fluye por el Recorrido. Al trasladarse se estira en una corriente: la cabeza tira y la cola va detrás. En cada parada se encharca. Nunca salta ni se rompe.
+_Avoid_: blob, metaball, líquido, gotas
