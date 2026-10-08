@@ -18,5 +18,5 @@ export const useStore = create<State>((set) => ({
   set: (patch) => set(patch),
 }))
 
-/** Months advanced per second at speed 1: one year in 40 s. */
-export const MONTHS_PER_SECOND = 0.3
+/** Months advanced per second at speed 1: one year in 50 s. */
+export const MONTHS_PER_SECOND = 0.24
