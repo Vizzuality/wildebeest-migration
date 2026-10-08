@@ -1,7 +1,6 @@
 import { Canvas } from '@react-three/fiber'
 import { Suspense, useEffect } from 'react'
 import * as THREE from 'three'
-import { INTRO_FROM } from './scene/CameraRig'
 import { useFauna } from './fauna'
 import { Scene } from './scene/Scene'
 import { useStore } from './store'
@@ -16,7 +15,7 @@ function World() {
       <Canvas
         className="canvas"
         dpr={[1, 2]}
-        camera={{ position: INTRO_FROM.toArray(), fov: 38, near: 0.5, far: 3000 }}
+        camera={{ fov: 38, near: 0.5, far: 3000 }}
         gl={{ antialias: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }}
       >
         <Scene />
