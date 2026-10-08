@@ -26,6 +26,12 @@ const CRUCE_MIN_PER_KM = 1.5
 const MAX_GAP_H = 9
 /** Fixes further than this from the month's spread (in standard deviations) are strays. */
 const STRAY_SIGMA = 2.5
+/**
+ * Walking within this many km of a main river costs extra, up to RIVER_COST on the bank, so the
+ * way keeps off the banks and crosses straight over instead of following a channel it may cross.
+ */
+const RIVER_SHY_KM = 4
+const RIVER_COST = 8
 /** Recorrido samples per month. */
 const SAMPLES_PER_MONTH = 60
 
@@ -247,8 +253,8 @@ function forma(fixes: Fix[]) {
   })
 }
 
-/** Height, Lago and tree cover per routing cell, read off the terrain bake. */
-function costGrid(terrain: { nx: number; nz: number; step: number }, elevation: Uint16Array, masks: Uint8Array, cover: Uint8Array) {
+/** Height, Lago, tree cover and how close a main river is, per routing cell. */
+function costGrid(terrain: { nx: number; nz: number; step: number }, elevation: Uint16Array, masks: Uint8Array, cover: Uint8Array, rivers: Pt[][]) {
   const at = (x: number, z: number) => {
     const ix = Math.min(terrain.nx - 1, Math.max(0, Math.round((x - MAP.minX) / terrain.step)))
     const iz = Math.min(terrain.nz - 1, Math.max(0, Math.round((z - MAP.minZ) / terrain.step)))
@@ -268,7 +274,33 @@ function costGrid(terrain: { nx: number; nz: number; step: number }, elevation: 
       for (const dx of [-0.3, 0, 0.3]) for (const dz of [-0.3, 0, 0.3]) t += cover[at(x + dx, z + dz) * 4] / 255 / 9
       trees[i] = t
     }
-  return { height, lake, trees }
+  // Distance (km) to the nearest main river: mark the cells each river runs through, then spread
+  // out with a two-pass chamfer.
+  const gap = new Float32Array(nx * nz).fill(Infinity)
+  for (const line of rivers)
+    for (let k = 1; k < line.length; k++) {
+      const [a, b] = [line[k - 1], line[k]]
+      const n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / (STEP / 2)) + 1
+      for (let s = 0; s <= n; s++) {
+        const ix = Math.round((a[0] + ((b[0] - a[0]) * s) / n - MAP.minX) / STEP)
+        const iz = Math.round((a[1] + ((b[1] - a[1]) * s) / n - MAP.minZ) / STEP)
+        if (ix >= 0 && iz >= 0 && ix < nx && iz < nz) gap[iz * nx + ix] = 0
+      }
+    }
+  const pass = (from: number, to: number, dir: number, offsets: [number, number][]) => {
+    for (let iz = from; iz !== to; iz += dir)
+      for (let ix = dir > 0 ? 0 : nx - 1; dir > 0 ? ix < nx : ix >= 0; ix += dir)
+        for (const [dx, dz] of offsets) {
+          const jx = ix + dx
+          const jz = iz + dz
+          if (jx < 0 || jz < 0 || jx >= nx || jz >= nz) continue
+          gap[iz * nx + ix] = Math.min(gap[iz * nx + ix], gap[jz * nx + jx] + Math.hypot(dx, dz) * STEP)
+        }
+  }
+  pass(0, nz, 1, [[-1, 0], [-1, -1], [0, -1], [1, -1]])
+  pass(nz - 1, -1, -1, [[1, 0], [1, 1], [0, 1], [-1, 1]])
+  const near = gap.map((g) => Math.max(0, 1 - g / RIVER_SHY_KM))
+  return { height, lake, trees, near }
 }
 
 const NEIGHBOURS: Pt[] = [
@@ -343,7 +375,7 @@ function easyPath(a: Pt, b: Pt, cost: ReturnType<typeof costGrid>, walls: Segmen
       if (cost.lake[j] > 0.5 || walls.crossings(centre(i), centre(j)).length) continue
       const len = Math.hypot(dx, dz) * STEP
       const slope = Math.abs(cost.height[j] - cost.height[i]) / len
-      const nd = d + len * (1 + slope * 12 + cost.trees[j] * 3)
+      const nd = d + len * (1 + slope * 12 + cost.trees[j] * 3 + cost.near[j] * RIVER_COST)
       if (nd < dist[j]) {
         dist[j] = nd
         from[j] = i
@@ -468,7 +500,8 @@ for (const c of cuts) console.log(`Cruce del ${c.river}: ${c.s0}–${c.s1} km al
 const walls = barriers(main, cuts)
 
 console.log('Recorrido:')
-const path = recorrido(costGrid(terrain, elevation, masks, cover), new SegmentIndex(segmentsOf([{ name: 'barrier', lines: walls }])))
+const grid = costGrid(terrain, elevation, masks, cover, main.flatMap((r) => r.lines))
+const path = recorrido(grid, new SegmentIndex(segmentsOf([{ name: 'barrier', lines: walls }])))
 const spread = forma(fixes)
 spread.forEach(([xx, xz, zz], m) => {
   const tr = xx + zz

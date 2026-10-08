@@ -95,7 +95,7 @@ Un animal que vive todo el año en la misma zona y no sigue a la Manada: jirafa 
 _Avoid_: fauna local, animales de fondo
 
 **Recorrido**:
-La sucesión de lugares con nombre y fechas por la que pasa el centro de la Manada a lo largo del año: Ndutu (enero a mediados de marzo), Kopjes de Moru (abril), Seronera (mayo), Corredor occidental (junio), Kogatende (julio), Triángulo del Mara (agosto y septiembre, al otro lado del Mara), Kogatende (octubre), Lobo (noviembre) y de vuelta por Seronera a Ndutu (diciembre). Los lugares y las fechas se marcan a mano, como lo cuentan las fuentes; entre un lugar y el siguiente sigue el paso fácil por el Relieve y cruza los Ríos principales solo por sus Cruces.
+La sucesión de lugares con nombre y fechas por la que pasa el centro de la Manada a lo largo del año: Ndutu (enero a mediados de marzo), Kopjes de Moru (abril), Seronera (mayo), Corredor occidental (junio), Kogatende (julio), Triángulo del Mara (agosto y septiembre, al otro lado del Mara), Kogatende (octubre), Lobo (noviembre) y de vuelta por Seronera a Ndutu (diciembre). Los lugares y las fechas se marcan a mano, como lo cuentan las fuentes; entre un lugar y el siguiente sigue el paso fácil por el Relieve, lejos de las orillas de los Ríos principales, y los cruza de frente y solo por sus Cruces.
 _Avoid_: ruta, trayectoria, path
 
 **Presencia**:
