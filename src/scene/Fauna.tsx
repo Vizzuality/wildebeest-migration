@@ -3,6 +3,8 @@ import { useFrame } from '@react-three/fiber'
 import { useCallback, useEffect, useMemo } from 'react'
 import * as THREE from 'three'
 import { useFauna, type FaunaBake } from '../fauna'
+import { CAUDAL } from '../geo'
+import { stageAt } from '../shaders/rivers'
 import { GLSL_COMMON, shared } from '../shaders/common'
 import { mulberry32, useHeightfield, type Heightfield, type RiverLine } from '../terrain'
 import { useStore } from '../store'
@@ -73,6 +75,25 @@ const WANDER_WAVES = 4
  * crossing) the Manada draws in: it keeps within BANK of that distance, giving way softly.
  */
 const BANK = 0.6
+/**
+ * Agolpamiento: short of a Cruce the Manada eases to a halt BANK_KM from the river and waits
+ * there HOLD_MONTHS of that river at full Caudal (less as the water drops), every drop pooling as
+ * it arrives, then sets off again at its usual pace. The time lost is made up at the next stay,
+ * where the Manada is standing still anyway, so it never has to rush. The Mara is where it
+ * waits; the Grumeti and Mbalageti are crossed almost along their whole course and barely hold
+ * it up.
+ */
+const BANK_KM = 3
+const HOLD_MONTHS: Record<string, number> = { Mara: 0.1, Grumeti: 0.02, Mbalageti: 0.02 }
+/** How long (months) it takes to slow to a halt on the bank, and to get going again. */
+const HOLD_EASE = 0.05
+/** Over how long (months) a stay makes up the time, and how far past the river it is looked for. */
+const CATCH_UP = 0.5
+const STAY_SEARCH = [0.2, 0.6]
+/** The way's clock is counted from here (months), where nothing holds it up or makes up time. */
+const CLOCK_FROM = 3
+/** Crossings of the same river closer than this along the way (months) are one Cruce. */
+const SAME_CRUCE = 0.3
 /** Draped grid resolution, and the lift that keeps it off the ground (km). */
 const GRID = 320
 const LIFT = 0.03
@@ -257,30 +278,109 @@ function rooms(recorrido: [number, number][], rivers: RiverLine[]) {
   })
 }
 
+/** Each sample after which the way steps over a main river, and that river. */
+function crossingsOf(recorrido: [number, number][], rivers: RiverLine[]) {
+  const n = recorrido.length
+  const segments = rivers.filter((r) => r.kind === 'main').flatMap((r) => r.points.slice(1).map((q, k) => ({ a: r.points[k], b: q, river: r.name })))
+  const found: { i: number; river: string }[] = []
+  for (let i = 0; i < n; i++) {
+    const a = recorrido[i]
+    const b = recorrido[(i + 1) % n]
+    if (a[0] === b[0] && a[1] === b[1]) continue
+    const [x0, x1, z0, z1] = [Math.min(a[0], b[0]), Math.max(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[1], b[1])]
+    const hit = segments.find(
+      ({ a: c, b: d }) =>
+        Math.max(c[0], d[0]) >= x0 && Math.min(c[0], d[0]) <= x1 && Math.max(c[1], d[1]) >= z0 && Math.min(c[1], d[1]) <= z1 && crosses(a, b, c, d),
+    )
+    if (hit) found.push({ i, river: hit.river })
+  }
+  return found
+}
+
 /** How far along the way (km, wrapping round the year) each sample is from the nearest main river crossing. */
 function necks(recorrido: [number, number][], rivers: RiverLine[]) {
   const n = recorrido.length
   const km = [0]
   for (let i = 1; i <= n; i++) km.push(km[i - 1] + Math.hypot(recorrido[i % n][0] - recorrido[i - 1][0], recorrido[i % n][1] - recorrido[i - 1][1]))
   const loop = km[n]
-  const segments = rivers.filter((r) => r.kind === 'main').flatMap((r) => r.points.slice(1).map((q, k) => [r.points[k], q] as const))
-  const crossings: number[] = []
-  for (let i = 0; i < n; i++) {
-    const a = recorrido[i]
-    const b = recorrido[(i + 1) % n]
-    if (a[0] === b[0] && a[1] === b[1]) continue
-    const [x0, x1, z0, z1] = [Math.min(a[0], b[0]), Math.max(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[1], b[1])]
-    const near = ([c, d]: (typeof segments)[number]) =>
-      Math.max(c[0], d[0]) >= x0 && Math.min(c[0], d[0]) <= x1 && Math.max(c[1], d[1]) >= z0 && Math.min(c[1], d[1]) <= z1
-    if (segments.some((seg) => near(seg) && crosses(a, b, seg[0], seg[1]))) crossings.push((km[i] + km[i + 1]) / 2)
-  }
+  const crossings = crossingsOf(recorrido, rivers).map(({ i }) => (km[i] + km[i + 1]) / 2)
   return km.slice(0, n).map((at) => {
     const gap = Math.min(Infinity, ...crossings.map((c) => Math.min(Math.abs(at - c), loop - Math.abs(at - c))))
     return THREE.MathUtils.smoothstep(gap, 0, NECK_REACH)
   })
 }
 
-/** The Recorrido blurred over time, wrapping round the year. */
+/** 0 to 1 and back over `ease`, with `flat` of 1 in between: how hard the way is held at a moment. */
+function plateau(x: number, flat: number, ease: number) {
+  if (x <= 0 || x >= flat + 2 * ease) return 0
+  if (x < ease) return (1 - Math.cos((Math.PI * x) / ease)) / 2
+  if (x <= flat + ease) return 1
+  return (1 + Math.cos((Math.PI * (x - flat - ease)) / ease)) / 2
+}
+
+/**
+ * The way retimed for the Agolpamientos. Positions are untouched; only when the Manada is at each
+ * one changes.
+ */
+function agolpar(recorrido: [number, number][], samplesPerMonth: number, rivers: RiverLine[]) {
+  const n = recorrido.length
+  const room = rooms(recorrido, rivers)
+  const pace = recorrido.map(([x, z], i) => {
+    const [px, pz] = recorrido[(i + 1) % n]
+    return Math.hypot(px - x, pz - z) * samplesPerMonth
+  })
+  // How fast the way's own clock runs through each sample: 0 while held, above 1 while catching up.
+  const rate = new Float64Array(n).fill(1)
+  let last: { i: number; river: string } | null = null
+  for (const c of crossingsOf(recorrido, rivers)) {
+    if (last && last.river === c.river && (c.i - last.i) / samplesPerMonth < SAME_CRUCE) continue
+    last = c
+    const full = HOLD_MONTHS[c.river]
+    if (!full) continue
+    // Back along the way to where the river is BANK_KM off, no further than a Cruce apart.
+    let j = c.i
+    while (j > c.i - SAME_CRUCE * samplesPerMonth && room[((j % n) + n) % n] < BANK_KM) j--
+    const lost = full * stageAt(CAUDAL[c.river], j / samplesPerMonth)
+    // Eases to a halt and off again; the halt plus half of each ease is the time lost. Easing in
+    // carries the way on half the ease, so it starts slowing that much short of the bank.
+    const ease = Math.min(HOLD_EASE, lost)
+    const flat = lost - ease
+    const span = flat + 2 * ease
+    const from = j - Math.round((ease / 2) * samplesPerMonth)
+    for (let k = 0; k <= span * samplesPerMonth; k++) {
+      const s = (((from + k) % n) + n) % n
+      rate[s] -= plateau(k / samplesPerMonth, flat, ease)
+    }
+    // Made up where the way is stillest soon after the river, as a gentle bump in the clock's
+    // pace. Running late, the Manada gets there `lost` after the calendar would.
+    let stay = c.i + Math.round(STAY_SEARCH[0] * samplesPerMonth)
+    for (let k = stay; k <= c.i + STAY_SEARCH[1] * samplesPerMonth; k++) if (pace[k % n] < pace[stay % n]) stay = k
+    const width = CATCH_UP * samplesPerMonth
+    for (let k = 0; k <= width; k++) {
+      const s = (stay + Math.round(lost * samplesPerMonth) + k) % n
+      rate[s] += (lost / CATCH_UP) * (1 - Math.cos((2 * Math.PI * k) / width))
+    }
+  }
+  // Integrate the clock, then read the old way at the new time.
+  const clock = new Float64Array(n)
+  const origin = CLOCK_FROM * samplesPerMonth
+  clock[origin] = CLOCK_FROM
+  for (let k = 1; k < n; k++) {
+    const i = (origin + k) % n
+    const prev = (i - 1 + n) % n
+    clock[i] = clock[prev] + Math.max(0, rate[prev]) / samplesPerMonth
+  }
+  const at = (time: number) => {
+    const f = (((time * samplesPerMonth) % n) + n) % n
+    const i = Math.floor(f)
+    const [ax, az] = recorrido[i]
+    const [bx, bz] = recorrido[(i + 1) % n]
+    return [ax + (bx - ax) * (f - i), az + (bz - az) * (f - i)] as [number, number]
+  }
+  return Array.from(clock, at)
+}
+
+/** The Recorrido blurred over time, wrapping round the year, then held up at its Cruces. */
 function rounded(bake: FaunaBake, rivers: RiverLine[]): Way {
   const pts = bake.recorrido
   const n = pts.length
@@ -288,7 +388,7 @@ function rounded(bake: FaunaBake, rivers: RiverLine[]): Way {
   const reach = Math.ceil(sigma * 3)
   const weights = Array.from({ length: 2 * reach + 1 }, (_, k) => Math.exp(-0.5 * ((k - reach) / sigma) ** 2))
   const total = weights.reduce((a, b) => a + b, 0)
-  const recorrido = pts.map((_, i) => {
+  const blurred = pts.map((_, i) => {
     let x = 0
     let z = 0
     weights.forEach((w, k) => {
@@ -298,6 +398,7 @@ function rounded(bake: FaunaBake, rivers: RiverLine[]): Way {
     })
     return [x / total, z / total] as [number, number]
   })
+  const recorrido = agolpar(blurred, bake.samplesPerMonth, rivers)
   return {
     ...bake,
     recorrido,
