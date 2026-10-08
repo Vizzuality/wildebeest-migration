@@ -1,11 +1,12 @@
 import { Line } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import * as THREE from 'three'
 import { useFauna, type FaunaBake } from '../fauna'
 import { GLSL_COMMON, shared } from '../shaders/common'
 import { mulberry32, useHeightfield, type Heightfield, type RiverLine } from '../terrain'
 import { useStore } from '../store'
+import { Partos, type OnMancha } from './Partos'
 
 // The Manada as a liquid poured along the Recorrido. It is a chain of drops, each running a
 // little ahead of or behind the calendar, merged into one smooth surface like metaballs. On the
@@ -88,6 +89,11 @@ interface Drop {
 /** A slow wave through the year, about ±1, that comes back to the same value each year. */
 function swell(waves: Wave[], month: number) {
   return waves.reduce((sum, w, k) => sum + w.size * Math.sin((2 * Math.PI * (k + 1) * month) / 12 + w.phase), 0)
+}
+
+/** How far ahead of or behind the calendar a drop runs at this moment (months). */
+function lagAt(drop: Drop, month: number) {
+  return drop.lag + swell(drop.late, month) * WANDER_LAG
 }
 
 function drops(): Drop[] {
@@ -439,7 +445,7 @@ function place(bake: Way, hf: Heightfield, all: Drop[], month: number, clock: nu
   let biggest = 0
   const spine: { lag: number; x: number; z: number; r: number }[] = []
   all.forEach((drop, i) => {
-    const lag = drop.lag + swell(drop.late, month) * WANDER_LAG
+    const lag = lagAt(drop, month)
     const t = month + lag
     const { x, z, sx, sz, tx, tz, pace, open, size } = spot(bake, drop, t, clock)
     const mid = spot(bake, drop, t - TRAIL_MONTHS, clock, open)
@@ -515,9 +521,22 @@ export function Fauna() {
 
   useFrame(() => place(bake, hf, all, useStore.getState().month, shared.uClock.value))
 
+  // Well inside one drop, so the point is on the liquid whatever its neighbours do.
+  const onMancha = useCallback<OnMancha>(
+    (month, rnd) => {
+      const drop = all[Math.floor(rnd() * all.length)]
+      const { x, z, size } = spot(bake, drop, month + lagAt(drop, month), 0)
+      const angle = rnd() * Math.PI * 2
+      const reach = Math.sqrt(rnd()) * size * 0.45
+      return [x + Math.cos(angle) * reach, z + Math.sin(angle) * reach]
+    },
+    [bake, all],
+  )
+
   return (
     <>
       <mesh geometry={geometry} material={material} frustumCulled={false} />
+      <Partos onMancha={onMancha} />
       {SHOW_RECORRIDO && <RecorridoLine bake={bake} hf={hf} />}
     </>
   )
