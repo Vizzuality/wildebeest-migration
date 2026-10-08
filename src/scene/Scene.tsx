@@ -10,6 +10,7 @@ import { Rivers } from './Rivers'
 import { Sky } from './Sky'
 import { Terrain } from './Terrain'
 import { Groves } from './Groves'
+import { Fauna } from './Fauna'
 
 function Clock() {
   useFrame((_, dt) => {
@@ -37,6 +38,7 @@ export function Scene() {
       <Terrain />
       <Rivers />
       <Groves />
+      <Fauna />
       <Border />
       <Labels />
       <CameraRig />
