@@ -58,15 +58,15 @@ const NECK_DROP = 0.55
  * place in it, as a sum of slow yearly waves, so its line closes on itself each year. Measured
  * against the stream, it narrows with it at a crossing and never strays out of it.
  */
-const WANDER_SIDE = 0.45
-const WANDER_LAG = 0.07
+const WANDER_SIDE = 0.3
+const WANDER_LAG = 0.05
 const WANDER_WAVES = 4
 /**
  * A drop never strays further from its point on the Recorrido than the nearest main river, so
  * none ends up across a river the way has not crossed. Close to a river (a corridor, a bank, a
  * crossing) the Manada draws in: it keeps within BANK of that distance, giving way softly.
  */
-const BANK = 0.85
+const BANK = 0.6
 /** Draped grid resolution, and the lift that keeps it off the ground (km). */
 const GRID = 320
 const LIFT = 0.03
