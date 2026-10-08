@@ -324,7 +324,7 @@ function easyPath(a: Pt, b: Pt, cost: ReturnType<typeof costGrid>, walls: Segmen
   const centre = (i: number): Pt => [MAP.minX + (i % nx) * STEP, MAP.minZ + Math.floor(i / nx) * STEP]
   const start = cell(a)
   const goal = cell(b)
-  const dist = new Float32Array(nx * nz).fill(Infinity)
+  const dist = new Float64Array(nx * nz).fill(Infinity)
   const from = new Int32Array(nx * nz).fill(-1)
   const heap = new Heap()
   dist[start] = 0
