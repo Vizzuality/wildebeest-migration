@@ -87,7 +87,7 @@ _Avoid_: niebla de guerra, fog, fog of war, fade del borde
 ### Fauna
 
 **Manada**:
-Los animales que migran juntos por el ciclo anual: ñus, cebras y gacelas de Thomson (los elands, pocos, se dejan fuera). A escala de Mapa se ve como una sola Mancha. No incluye a los Residentes.
+Los animales que migran juntos por el ciclo anual: ñus, cebras y gacelas de Thomson (los elands, pocos, se dejan fuera). A escala de Mapa se ve como una sola Mancha. Su número no cambia a lo largo del año: los Partos y las Bajas se cuentan con Señales, no con el tamaño de la Mancha. No incluye a los Residentes.
 _Avoid_: herd, rebaño, migración, animales
 
 **Residente**:
@@ -105,3 +105,29 @@ _Avoid_: densidad, heatmap, extensión
 **Mancha**:
 La forma en que se ve la Manada a escala de Mapa: un único líquido espeso, como barro, siempre de una pieza, que fluye por el Recorrido. Al trasladarse se estira en una corriente: la cabeza tira y la cola va detrás. En cada parada se encharca. Nunca salta ni se rompe.
 _Avoid_: blob, metaball, líquido, gotas
+
+**Apiñamiento**:
+Lo apretada que va la Manada en cada punto de la Mancha. Es lo único de los eventos que se ve en la propia Mancha: donde más se apiña, más intenso es su color.
+_Avoid_: densidad, superposición, Presencia
+
+**Agolpamiento**:
+La espera de la Manada en la orilla de un Cruce: la cabeza se para, la cola sigue llegando y la Mancha se encharca contra el río. Dura más cuanto más Caudal lleva el río y es sobre todo cosa del Mara, que se pasa en Kogatende a la ida y a la vuelta; en el Grumeti y el Mbalageti apenas hay espera.
+_Avoid_: cola, atasco, espera
+
+**Avalancha**:
+El cruce en tropel que pone fin a un Agolpamiento: la Manada atraviesa el Cruce de golpe, más deprisa que su paso normal.
+_Avoid_: estampida, cruce masivo
+
+**Partos**:
+La ventana de unas tres semanas, entre finales de enero y febrero, en que nacen las crías de ñu en las llanuras de Ndutu.
+_Avoid_: nacimientos, crías, calving
+
+**Baja**:
+Un animal de la Manada que muere. El grueso cae en los Cruces del Mara durante las Avalanchas; fuera de ahí hay pocas, sueltas a lo largo del año.
+_Avoid_: muerte, mortalidad
+
+### Señales
+
+**Señal**:
+Una marca gráfica (destello o anillo) que cuenta un evento de la Manada sobre la Mancha, sin tocarla. Es lo único deliberadamente no naturalista del Mapa. Se ancla al lugar y la fecha que dan las fuentes, pero manda que se lea: el evento que cuenta puede alargarse en el calendario, y la Señal dura más que él. Las de Partos salen salpicadas sobre la Mancha, más seguidas en el pico de la ventana; las de Baja, de otro color, se apagan. Ninguna representa a un animal concreto.
+_Avoid_: efecto, partícula, FX
