@@ -27,6 +27,10 @@ const DROP_SIZE = 0.48
 const STRETCH = 0.35
 /** Where the merged field becomes liquid. */
 const SURFACE = 0.45
+/** The field over which the Apiñamiento goes from none to full, and its glow. */
+const CROWD_FROM = 2
+const CROWD_FULL = 9
+const CROWD_GLOW = 0.12
 /** How far back in time each drop's trail reaches, per segment (months), and how it thins. */
 const TRAIL_MONTHS = 0.06
 const TRAIL_HEAD = 0.55
@@ -212,12 +216,15 @@ void main() {
 
   // The surface bulges a little where the liquid runs deep, so the sun models it.
   vec3 normal = normalize(vec3(-grad.x * 0.6, 1.0, -grad.y * 0.6));
-  float deep = smoothstep(${SURFACE.toFixed(2)}, 2.2, field);
+  // Apiñamiento: the more drops pile up on a point, the more packed the Manada is there.
+  float crowd = smoothstep(${CROWD_FROM.toFixed(1)}, ${CROWD_FULL.toFixed(1)}, field);
   float grain = tnoise(local * 3.0) * 0.5 + tnoise(local * 9.0) * 0.3;
-  vec3 albedo = mix(vec3(0.24, 0.19, 0.14), vec3(0.075, 0.065, 0.06), deep);
+  vec3 albedo = mix(vec3(0.2, 0.16, 0.12), vec3(0.38, 0.2, 0.08), crowd);
   albedo *= 1.0 + grain * 0.18;
   albedo = mix(vec3(0.42, 0.35, 0.26), albedo, body);
   vec3 lit = sunlight(srgb(albedo), normal, cloudShadow(p));
+  // Packed tight it glows a little on top of the light, so the crowd reads even in shadow.
+  lit += srgb(vec3(0.62, 0.3, 0.08)) * crowd * crowd * ${CROWD_GLOW.toFixed(2)} * body;
   gl_FragColor = vec4(lit, alpha);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
