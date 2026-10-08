@@ -2,6 +2,7 @@ import { Canvas } from '@react-three/fiber'
 import { Suspense, useEffect } from 'react'
 import * as THREE from 'three'
 import { INTRO_FROM } from './scene/CameraRig'
+import { useFauna } from './fauna'
 import { Scene } from './scene/Scene'
 import { useStore } from './store'
 import { useHeightfield } from './terrain'
@@ -9,6 +10,7 @@ import { Curtain, TerrainErrorBoundary } from './ui/Curtain'
 
 function World() {
   useHeightfield()
+  useFauna()
   return (
     <>
       <Canvas

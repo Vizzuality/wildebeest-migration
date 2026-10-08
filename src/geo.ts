@@ -61,3 +61,17 @@ export const PLACES: { name: string; at: LonLat; kind?: 'country' | 'water' | 'r
   { name: 'Río Mara', at: [34.55, -1.5], kind: 'river', river: 'Mara' },
   { name: 'Río Grumeti', at: [34.62, -2.05], kind: 'river', river: 'Grumeti' },
 ]
+
+// Recorrido: where the centre of the Manada is through the year, as the sources tell it. Times
+// are in months from 1 January (15 April is 3.5); `until` is when it leaves after a stay.
+export const RECORRIDO: { place: string; at: number; until?: number }[] = [
+  { place: 'Ndutu', at: 0, until: 2.5 },
+  { place: 'Kopjes de Moru', at: 3.5 },
+  { place: 'Seronera', at: 4.5 },
+  { place: 'Corredor occidental', at: 5.5 },
+  { place: 'Kogatende', at: 6.5 },
+  { place: 'Masái Mara', at: 7.5, until: 9 },
+  { place: 'Kogatende', at: 9.5 },
+  { place: 'Lobo', at: 10.5 },
+  { place: 'Seronera', at: 11.3 },
+]

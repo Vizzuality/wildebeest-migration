@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "bake:terrain": "node scripts/bake-terrain.ts"
+    "bake:terrain": "node scripts/bake-terrain.ts",
+    "bake:fauna": "node scripts/bake-fauna.ts"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.9",
