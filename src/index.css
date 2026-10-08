@@ -22,3 +22,12 @@ body { font-family: var(--sans); color: var(--ink); -webkit-font-smoothing: anti
 .curtain.leaving { pointer-events: none; animation: curtain-out .9s ease-out .15s forwards; }
 .curtain button { font: 600 13px var(--sans); color: #3a2d1f; background: rgba(255,255,255,.4); border: 1px solid rgba(58,45,31,.3); border-radius: 999px; padding: 8px 18px; cursor: pointer; }
 @keyframes curtain-out { to { opacity: 0; visibility: hidden; } }
+
+/* Timeline */
+.timeline { position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 10; display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 12px; background: rgba(27,24,20,.72); backdrop-filter: blur(6px); font-size: 12px; }
+.timeline button { width: 32px; height: 32px; flex: none; border: 0; border-radius: 50%; background: rgba(251,243,230,.15); color: var(--ink); font-size: 12px; cursor: pointer; }
+.timeline .date { width: 48px; flex: none; font-variant-numeric: tabular-nums; }
+.timeline .track { flex: 1; min-width: 0; }
+.timeline input { width: 100%; margin: 0; accent-color: #e0b25a; }
+.timeline ol { display: flex; margin: 2px 0 0; padding: 0; list-style: none; opacity: .6; }
+.timeline li { flex: 1; text-align: center; }
