@@ -52,6 +52,8 @@ export const PLACES: { name: string; at: LonLat; kind?: 'country' | 'water' | 'r
   { name: 'Corredor occidental', at: [34.42, -2.3] },
   { name: 'Kogatende', at: [34.88, -1.64] },
   { name: 'Masái Mara', at: [35.12, -1.3] },
+  // West of the Mara, so the Manada crosses the river to get there and again to come back.
+  { name: 'Triángulo del Mara', at: [34.907, -1.407] },
   { name: 'Lobo', at: [35.17, -1.98] },
   { name: 'Ngorongoro', at: [35.58, -3.18] },
   { name: 'Lago Victoria', at: [33.65, -1.15], kind: 'water' },
@@ -69,9 +71,9 @@ export const RECORRIDO: { place: string; at: number; until?: number }[] = [
   { place: 'Kopjes de Moru', at: 3.5 },
   { place: 'Seronera', at: 4.5 },
   { place: 'Corredor occidental', at: 5.5 },
-  { place: 'Kogatende', at: 6.5 },
-  { place: 'Masái Mara', at: 7.5, until: 9 },
+  { place: 'Kogatende', at: 6.7 },
+  { place: 'Triángulo del Mara', at: 7.5, until: 9 },
   { place: 'Kogatende', at: 9.5 },
-  { place: 'Lobo', at: 10.5 },
-  { place: 'Seronera', at: 11.3 },
+  { place: 'Lobo', at: 10.3 },
+  { place: 'Seronera', at: 11.2 },
 ]

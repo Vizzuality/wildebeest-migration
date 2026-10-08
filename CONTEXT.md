@@ -53,7 +53,7 @@ Charca suelta que queda en el Lecho cuando el Caudal ya no da para un hilo conti
 _Avoid_: charco, pool, waterhole
 
 **Cruce**:
-Un tramo de un Río principal que la Manada atraviesa a menudo según los collares: el del Mara se concentra en torno a Kogatende, mientras el Grumeti y el Mbalageti se cruzan casi a lo largo de todo su curso. Un río puede tener varios; fuera de ellos la Manada no lo atraviesa. Cuándo se cruza lo decide la Presencia. Pertenece a la migración, no al río.
+Un tramo de un Río principal que la Manada atraviesa a menudo según los collares: el del Mara se concentra en torno a Kogatende, mientras el Grumeti y el Mbalageti se cruzan casi a lo largo de todo su curso. Un río puede tener varios; fuera de ellos la Manada no lo atraviesa. Cuándo se cruza lo decide la Presencia. En la realidad cada cruce es una sola orilla de bajada de unos cientos de metros, así que la Mancha se estrecha en un embudo al pasarlo. Pertenece a la migración, no al río.
 _Avoid_: vado, crossing, paso
 
 ### Vegetación
@@ -95,7 +95,7 @@ Un animal que vive todo el año en la misma zona y no sigue a la Manada: jirafa 
 _Avoid_: fauna local, animales de fondo
 
 **Recorrido**:
-La sucesión de lugares con nombre y fechas por la que pasa el centro de la Manada a lo largo del año: Ndutu (enero a mediados de marzo), Kopjes de Moru (abril), Seronera (mayo), Corredor occidental (junio), Kogatende (julio), Masái Mara (agosto y septiembre), Kogatende (octubre), Lobo (noviembre) y de vuelta por Seronera a Ndutu (diciembre). Los lugares y las fechas se marcan a mano, como lo cuentan las fuentes; entre un lugar y el siguiente sigue el paso fácil por el Relieve y cruza los Ríos principales solo por sus Cruces.
+La sucesión de lugares con nombre y fechas por la que pasa el centro de la Manada a lo largo del año: Ndutu (enero a mediados de marzo), Kopjes de Moru (abril), Seronera (mayo), Corredor occidental (junio), Kogatende (julio), Triángulo del Mara (agosto y septiembre, al otro lado del Mara), Kogatende (octubre), Lobo (noviembre) y de vuelta por Seronera a Ndutu (diciembre). Los lugares y las fechas se marcan a mano, como lo cuentan las fuentes; entre un lugar y el siguiente sigue el paso fácil por el Relieve y cruza los Ríos principales solo por sus Cruces.
 _Avoid_: ruta, trayectoria, path
 
 **Presencia**:
