@@ -25,3 +25,6 @@ dist-ssr
 
 # Terrain bake downloads
 .cache
+
+# Playwright MCP screenshots and logs
+.playwright-mcp/
