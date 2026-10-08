@@ -8,6 +8,7 @@ import { stageAt } from '../shaders/rivers'
 import { GLSL_COMMON, shared } from '../shaders/common'
 import { mulberry32, useHeightfield, type Heightfield, type RiverLine } from '../terrain'
 import { useStore } from '../store'
+import { Bajas, type Avalancha } from './Bajas'
 import { Partos, type OnMancha } from './Partos'
 
 // The Manada as a liquid poured along the Recorrido. It is a chain of drops, each running a
@@ -278,11 +279,11 @@ function rooms(recorrido: [number, number][], rivers: RiverLine[]) {
   })
 }
 
-/** Each sample after which the way steps over a main river, and that river. */
+/** Each sample after which the way steps over a main river, that river and the stretch of it crossed. */
 function crossingsOf(recorrido: [number, number][], rivers: RiverLine[]) {
   const n = recorrido.length
   const segments = rivers.filter((r) => r.kind === 'main').flatMap((r) => r.points.slice(1).map((q, k) => ({ a: r.points[k], b: q, river: r.name })))
-  const found: { i: number; river: string }[] = []
+  const found: { i: number; river: string; a: [number, number]; b: [number, number] }[] = []
   for (let i = 0; i < n; i++) {
     const a = recorrido[i]
     const b = recorrido[(i + 1) % n]
@@ -292,7 +293,7 @@ function crossingsOf(recorrido: [number, number][], rivers: RiverLine[]) {
       ({ a: c, b: d }) =>
         Math.max(c[0], d[0]) >= x0 && Math.min(c[0], d[0]) <= x1 && Math.max(c[1], d[1]) >= z0 && Math.min(c[1], d[1]) <= z1 && crosses(a, b, c, d),
     )
-    if (hit) found.push({ i, river: hit.river })
+    if (hit) found.push({ i, ...hit })
   }
   return found
 }
@@ -587,6 +588,40 @@ function place(bake: Way, hf: Heightfield, all: Drop[], month: number, clock: nu
   uniforms.uSize.value = size
 }
 
+/**
+ * The Avalanchas of the Mara: where the way, held up and all, steps over it, and when each drop
+ * gets there, the head first and the tail last.
+ */
+function avalanchasOf(way: Way, rivers: RiverLine[], all: Drop[]): Avalancha[] {
+  const spm = way.samplesPerMonth
+  const found: Avalancha[] = []
+  let last = -Infinity
+  for (const { i, river, a, b } of crossingsOf(way.recorrido, rivers)) {
+    if (river !== 'Mara' || (i - last) / spm < SAME_CRUCE) continue
+    last = i
+    const [px, pz] = way.recorrido[i]
+    const [qx, qz] = way.recorrido[(i + 1) % way.recorrido.length]
+    // Where the step meets the river, along both.
+    const [rx, rz] = [b[0] - a[0], b[1] - a[1]]
+    const cross = (qx - px) * rz - (qz - pz) * rx
+    const k = ((a[0] - px) * rz - (a[1] - pz) * rx) / cross
+    const month = (i + k) / spm
+    const length = Math.hypot(rx, rz)
+    found.push({
+      x: px + (qx - px) * k,
+      z: pz + (qz - pz) * k,
+      tx: rx / length,
+      tz: rz / length,
+      caudal: stageAt(CAUDAL.Mara, month),
+      when: (rnd) => {
+        const drop = all[Math.floor(rnd() * all.length)]
+        return month - lagAt(drop, month - drop.lag)
+      },
+    })
+  }
+  return found
+}
+
 /** ?recorrido draws the way the Manada follows, coloured by month, for checking it by eye. */
 const SHOW_RECORRIDO = new URLSearchParams(window.location.search).has('recorrido')
 
@@ -641,10 +676,13 @@ export function Fauna() {
     [bake, all],
   )
 
+  const avalanchas = useMemo(() => avalanchasOf(bake, hf.rivers, all), [bake, hf.rivers, all])
+
   return (
     <>
       <mesh geometry={geometry} material={material} frustumCulled={false} />
       <Partos onMancha={onMancha} />
+      <Bajas avalanchas={avalanchas} onMancha={onMancha} />
       {SHOW_RECORRIDO && <RecorridoLine bake={bake} hf={hf} />}
     </>
   )
