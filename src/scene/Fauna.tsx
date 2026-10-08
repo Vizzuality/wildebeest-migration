@@ -25,8 +25,9 @@ const SQUEEZE_KM_PER_MONTH = 30
 const DROP_SIZE = 0.48
 /** How much each drop stretches along the way, per km/month of pace. */
 const STRETCH = 0.35
-/** Where the merged field becomes liquid. */
-const SURFACE = 0.45
+/** The field over which the liquid's edge fades in. */
+const EDGE_FROM = 0.15
+const EDGE_FULL = 1.4
 /** The field over which the Apiñamiento goes from none to full, and its glow. */
 const CROWD_FROM = 2
 const CROWD_FULL = 9
@@ -207,10 +208,9 @@ void main() {
       field += thread(p, uSpine[i], uSpine[i + 1], min(uSpine[i].z, uSpine[i + 1].z) * 0.55, grad);
     }
   }
-  float halo = smoothstep(0.12, ${SURFACE.toFixed(2)}, field) * 0.18;
-  float edge = fwidth(field) * 1.2;
-  float body = smoothstep(${SURFACE.toFixed(2)} - edge, ${SURFACE.toFixed(2)} + edge, field);
-  float alpha = max(body * 0.9, halo);
+  // No hard rim: the liquid fades out to nothing towards its edge.
+  float body = smoothstep(${EDGE_FROM.toFixed(2)}, ${EDGE_FULL.toFixed(2)}, field);
+  float alpha = body * 0.9;
   if (alpha < 0.005) discard;
   local /= max(field, 1e-4);
 
