@@ -384,8 +384,38 @@ function along(line: Pt[], share: number): Pt {
 }
 
 /**
+ * Distance travelled at each moment, through knots of (month, km) that never go back. Monotone
+ * cubic (Fritsch–Carlson), so the pace changes smoothly through a place the Manada passes by and
+ * eases to a halt only where it stays (where the distance stops growing).
+ */
+function pacing(knots: { t: number; d: number }[]) {
+  const n = knots.length
+  const secant = knots.slice(0, -1).map((k, i) => (knots[i + 1].d - k.d) / (knots[i + 1].t - k.t))
+  const slope = knots.map((_, i) => {
+    if (i === 0 || i === n - 1) {
+      // The year wraps: the first and last knot are the same moment.
+      const [a, b] = [secant.at(-1)!, secant[0]]
+      return a <= 0 || b <= 0 ? 0 : (2 * a * b) / (a + b)
+    }
+    const [a, b] = [secant[i - 1], secant[i]]
+    return a <= 0 || b <= 0 ? 0 : (2 * a * b) / (a + b)
+  })
+  return (t: number) => {
+    const i = Math.max(0, knots.findIndex((k, j) => j < n - 1 && t >= k.t && t <= knots[j + 1].t))
+    const [a, b] = [knots[i], knots[i + 1]]
+    const h = b.t - a.t
+    const s = (t - a.t) / h
+    const h00 = 2 * s ** 3 - 3 * s ** 2 + 1
+    const h10 = s ** 3 - 2 * s ** 2 + s
+    const h01 = -2 * s ** 3 + 3 * s ** 2
+    const h11 = s ** 3 - s ** 2
+    return h00 * a.d + h10 * h * slope[i] + h01 * b.d + h11 * h * slope[i + 1]
+  }
+}
+
+/**
  * The Recorrido as positions through the year, SAMPLES_PER_MONTH a month: still at each stay,
- * and between stops along the easy way, setting off and arriving gently.
+ * and between stays along the easy way, passing each place on time without stopping there.
  */
 function recorrido(cost: ReturnType<typeof costGrid>, walls: SegmentIndex) {
   const stops = RECORRIDO.map((s) => {
@@ -401,18 +431,23 @@ function recorrido(cost: ReturnType<typeof costGrid>, walls: SegmentIndex) {
     const km = l.line.slice(1).reduce((s, p, k) => s + Math.hypot(p[0] - l.line[k][0], p[1] - l.line[k][1]), 0)
     console.log(`  ${l.name}: ${km.toFixed(0)} km in ${(l.to - l.from).toFixed(1)} months`)
   }
-  const out: Pt[] = []
-  for (let n = 0; n < 12 * SAMPLES_PER_MONTH; n++) {
-    const t = n / SAMPLES_PER_MONTH
-    const leg = legs.find((l) => (t >= l.from && t < l.to) || (t + 12 >= l.from && t + 12 < l.to))
-    if (!leg) {
-      out.push(stops.find((s) => s.until !== undefined && t >= s.at && t <= s.until)!.xz)
-      continue
+  // The whole year as one loop, with the distance reached at each arrival and departure.
+  const loop: Pt[] = []
+  const knots: { t: number; d: number }[] = []
+  let km = 0
+  stops.forEach((s, k) => {
+    knots.push({ t: s.at, d: km })
+    if (s.until !== undefined) knots.push({ t: s.until, d: km })
+    const line = legs[k].line
+    for (let i = 0; i < line.length; i++) {
+      if (i > 0) km += Math.hypot(line[i][0] - line[i - 1][0], line[i][1] - line[i - 1][1])
+      if (i > 0 || k === 0) loop.push(line[i])
     }
-    const local = t >= leg.from ? t : t + 12
-    const f = (local - leg.from) / (leg.to - leg.from)
-    out.push(along(leg.line, f * f * (3 - 2 * f)))
-  }
+  })
+  knots.push({ t: 12, d: km })
+  const distance = pacing(knots)
+  const out: Pt[] = []
+  for (let n = 0; n < 12 * SAMPLES_PER_MONTH; n++) out.push(along(loop, distance(n / SAMPLES_PER_MONTH) / km))
   return out
 }
 
