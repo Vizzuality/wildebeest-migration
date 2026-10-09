@@ -9,7 +9,7 @@ import { HORIZON } from './Sky'
 /**
  * The mesh keeps one vertex in STRIDE each way. At full resolution most triangles were smaller
  * than a pixel, and the GPU shades every triangle in 2×2 blocks, so the ground shader ran several
- * times per pixel. Normals (finer still than the grid), Cobertura and lakes come from textures
+ * times per pixel. Normals (finer still than the grid), Cobertura, Cultivo and lakes come from textures
  * instead, so the shading keeps every gully.
  */
 const STRIDE = 2
@@ -30,7 +30,7 @@ uniform vec2 uCrater;
 uniform vec2 uCraterLake;
 uniform sampler2D uNormal;
 uniform float uDetail;
-uniform sampler2D uLake;
+uniform sampler2D uGround;
 uniform sampler2D uCover;
 varying vec3 vWorld;
 
@@ -52,12 +52,15 @@ void main() {
   vec2 sideways = texture2D(uNormal, ((xz - uMapMin) / uMapStep * uDetail + 0.5) / vec2(textureSize(uNormal, 0))).xy;
   vec3 N = normalize(vec3(sideways.x, sqrt(max(0.0, 1.0 - dot(sideways, sideways))), sideways.y));
   vec4 cover = texture2D(uCover, grid);
+  vec2 ground = texture2D(uGround, grid).rg;
   float tree = cover.x;
   float shrub = cover.y;
   float wet = cover.z;
   float bare = cover.w;
   float grass = max(0.0, 1.0 - tree - shrub - wet - bare);
-  float lake = texture2D(uLake, grid).r;
+  float crop = min(ground.y, grass);
+  grass -= crop;
+  float lake = ground.x;
   float fw = length(fwidth(xz));
 
   float n2 = tnoise(xz * 0.35 + 3.0);
@@ -74,9 +77,21 @@ void main() {
   vec3 shrubCol = mix(srgb(vec3(0.50, 0.43, 0.31)), srgb(vec3(0.31, 0.41, 0.27)), g * 0.7) * (0.92 + 0.1 * n3);
   vec3 wetCol = mix(srgb(vec3(0.31, 0.42, 0.26)), srgb(vec3(0.19, 0.40, 0.22)), 0.4 + 0.6 * g);
   vec3 bareCol = srgb(vec3(0.72, 0.66, 0.56));
+
+  // Cultivo: a patchwork of plots a few hundred metres across, each tilled red soil, stubble or,
+  // as the rains come, green crop. Once plots shrink below a pixel it settles on their average.
+  vec2 plotUv = mat2(0.94, -0.34, 0.34, 0.94) * xz / 0.45;
+  vec2 plotId = floor(vec2(plotUv.x, plotUv.y + hash12(vec2(floor(plotUv.x), 7.0))));
+  float pick = hash12(plotId + 13.0);
+  float sown = g * 0.75;
+  vec3 soil = srgb(vec3(0.60, 0.40, 0.29));
+  vec3 plot = pick < sown ? fresh : pick < sown + (1.0 - sown) * 0.55 ? soil : straw;
+  vec3 cropAvg = fresh * sown + (soil * 0.55 + straw * 0.45) * (1.0 - sown);
+  vec3 cropCol = mix(cropAvg, plot, 1.0 - smoothstep(0.08, 0.2, fw)) * (0.95 + 0.05 * n3);
+
   float under = max(1.0 - tree, 1e-3);
-  vec3 floorCol = (grassCol * grass + shrubCol * shrub + wetCol * wet + bareCol * bare) / under;
-  if (grass + shrub + wet + bare < 1e-3) floorCol = grassCol;
+  vec3 floorCol = (grassCol * grass + cropCol * crop + shrubCol * shrub + wetCol * wet + bareCol * bare) / under;
+  if (grass + crop + shrub + wet + bare < 1e-3) floorCol = grassCol;
 
   // Quemas: black scar, greying to ash, then fresh shoots greener than the grass around.
   // Bend the 300 m cells of the burn record so scars get the ragged outline of a real fire.
@@ -191,9 +206,15 @@ function normalTexture({ nx, nz, normals, detail }: Heightfield) {
   return linear(new THREE.DataTexture(normals, (nx - 1) * detail + 1, (nz - 1) * detail + 1, THREE.RGFormat, THREE.HalfFloatType))
 }
 
-function lakeTexture({ nx, nz, masks }: Heightfield) {
-  const tex = new THREE.DataTexture(Uint8Array.from({ length: nx * nz }, (_, i) => Math.round(masks[i * 2 + 1] * 255)), nx, nz, THREE.RedFormat)
-  tex.unpackAlignment = 1
+/** Per grid vertex: lake (R) and Cultivo (G). */
+function groundTexture({ nx, nz, masks, crops }: Heightfield) {
+  const data = new Uint8Array(nx * nz * 2)
+  for (let i = 0; i < nx * nz; i++) {
+    data[i * 2] = Math.round(masks[i * 2 + 1] * 255)
+    data[i * 2 + 1] = Math.round(crops[i] * 255)
+  }
+  const tex = new THREE.DataTexture(data, nx, nz, THREE.RGFormat)
+  tex.unpackAlignment = 2
   return linear(tex)
 }
 
@@ -223,7 +244,7 @@ export function Terrain() {
           uCraterLake: { value: new THREE.Vector2(...CRATER_LAKE) },
           uNormal: { value: normalTexture(hf) },
           uDetail: { value: hf.detail },
-          uLake: { value: lakeTexture(hf) },
+          uGround: { value: groundTexture(hf) },
           uCover: { value: coverTexture(hf) },
         },
       }),

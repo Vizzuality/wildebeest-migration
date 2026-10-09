@@ -48,6 +48,8 @@ export interface Heightfield {
   heights: Float32Array
   /** Per vertex Cobertura (0–1): árbol, matorral, humedal, suelo desnudo. Hierba is the rest. */
   cover: Float32Array
+  /** Per vertex share of Cultivo (0–1), which `cover` counts inside hierba. */
+  crops: Float32Array
   /** Per vertex: distance to nearest river (km), lake (0/1). */
   masks: Float32Array
   /** Ground normals at `detail`× the grid's resolution: half-float x, z per cell. */
@@ -91,12 +93,13 @@ async function fetchHeightfield(): Promise<Heightfield> {
     toHeights(meta, elevation),
   )
   const detailP = fetchOk('/terrain/detail.bin').then((r) => r.arrayBuffer())
-  const [meta, heights, { relief, normals }, rawMasks, rawCover, rawVerdor, rawQuemas] = await Promise.all([
+  const [meta, heights, { relief, normals }, rawMasks, rawCover, rawCrops, rawVerdor, rawQuemas] = await Promise.all([
     metaP,
     heightsP,
     Promise.all([heightsP, detailP, metaP]).then(([h, detail, meta]) => reliefInWorker(h, new Int8Array(detail), meta)),
     fetchOk('/terrain/masks.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/cover.bin').then((r) => r.arrayBuffer()),
+    fetchOk('/terrain/crops.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/verdor.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/quemas.bin').then((r) => r.arrayBuffer()),
   ])
@@ -106,6 +109,7 @@ async function fetchHeightfield(): Promise<Heightfield> {
   const bytes = new Uint8Array(rawMasks)
   const masks = new Float32Array(nx * nz * 2)
   const cover = Float32Array.from(new Uint8Array(rawCover), (v) => v / 255)
+  const crops = Float32Array.from(new Uint8Array(rawCrops), (v) => v / 255)
   for (let i = 0; i < nx * nz; i++) {
     masks[i * 2] = (bytes[i * 2] / 240) * meta.riverMax
     masks[i * 2 + 1] = bytes[i * 2 + 1] / 255
@@ -123,7 +127,7 @@ async function fetchHeightfield(): Promise<Heightfield> {
   shared.uQuemaMask.value = quemaMaskTexture(new Uint8Array(rawQuemas), nx, nz)
   shared.uRelief.value = reliefTexture(relief, nx, nz)
 
-  const hf = { nx, nz, step, heights, cover, masks, normals, detail: meta.detail }
+  const hf = { nx, nz, step, heights, cover, crops, masks, normals, detail: meta.detail }
   return {
     ...hf,
     rivers: meta.rivers.flatMap((r) => r.lines.map((points) => ({ name: r.name, kind: r.kind, points }))),

@@ -62,6 +62,8 @@ const WORLDCOVER_TILES = ['S03E033', 'S06E033']
 const WORLDCOVER_LEVEL = 1
 /** Channels of cover.bin. Grassland, cropland and anything unlisted count as hierba. */
 const COVER: Record<number, number> = { 10: 0, 20: 1, 90: 2, 95: 2, 50: 3, 60: 3 }
+/** crops.bin: the share of Cultivo, which cover.bin leaves inside hierba. */
+const CROPS: Record<number, number> = { 40: 0 }
 const WATER = 80
 
 const PC = 'https://planetarycomputer.microsoft.com/api'
@@ -217,13 +219,14 @@ function resampleDetail(sample: (lon: number, lat: number) => number, coarse: (i
 }
 
 /**
- * Cobertura per cell: share of árbol, matorral, humedal and suelo desnudo among the
- * WorldCover pixels whose centre falls in the cell (open water left out). Hierba is the rest.
+ * Per cell, the share of each channel's WorldCover classes among the pixels whose centre falls
+ * in the cell (open water left out). For the Cobertura, hierba is whatever is left.
  */
-async function loadCover() {
+async function loadShares(classes: Record<number, number>, channels: number) {
   const [west, north] = unproject(MAP.minX - STEP, MAP.minZ - STEP)
   const [east, south] = unproject(MAP.maxX + STEP, MAP.maxZ + STEP)
-  const counts = new Uint16Array(nx * nz * 5)
+  const stride = channels + 1
+  const counts = new Uint16Array(nx * nz * stride)
   for (const tile of WORLDCOVER_TILES) {
     const tiff = await fromUrl(WORLDCOVER(tile))
     const full = await tiff.getImage(0)
@@ -250,9 +253,9 @@ async function loadCover() {
           if (ix < 0 || ix >= nx) continue
           const cls = band[r * w + c]
           if (cls === WATER || cls === 0) continue
-          const i = (iz * nx + ix) * 5
-          counts[i + 4]++
-          const ch = COVER[cls]
+          const i = (iz * nx + ix) * stride
+          counts[i + channels]++
+          const ch = classes[cls]
           if (ch !== undefined) counts[i + ch]++
         }
       }
@@ -260,13 +263,13 @@ async function loadCover() {
     }
     console.log()
   }
-  const cover = new Uint8Array(nx * nz * 4)
+  const shares = new Uint8Array(nx * nz * channels)
   for (let i = 0; i < nx * nz; i++) {
-    const total = counts[i * 5 + 4]
+    const total = counts[i * stride + channels]
     if (!total) continue
-    for (let ch = 0; ch < 4; ch++) cover[i * 4 + ch] = Math.round((counts[i * 5 + ch] / total) * 255)
+    for (let ch = 0; ch < channels; ch++) shares[i * channels + ch] = Math.round((counts[i * stride + ch] / total) * 255)
   }
-  return Buffer.from(cover.buffer)
+  return Buffer.from(shares.buffer)
 }
 
 async function pcToken() {
@@ -578,7 +581,8 @@ const rivers = RIVERS.map((r) => {
 const dist = riverDistance(rivers.flatMap((r) => r.lines))
 const verdor = await cached(`verdor-${YEARS.join('-')}-${STEP}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, loadVerdor)
 const quemas = await cached(`quemas-${YEARS.join('-')}-${BURN_YEARS}-${STEP}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, loadQuemas)
-const cover = await cached(`worldcover-${WORLDCOVER_LEVEL}-${STEP}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, loadCover)
+const cover = await cached(`worldcover-${WORLDCOVER_LEVEL}-${STEP}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, () => loadShares(COVER, 4))
+const crops = await cached(`worldcover-crops-${WORLDCOVER_LEVEL}-${STEP}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, () => loadShares(CROPS, 1))
 
 // Elevation in decimetres so 1 m steps never show up as terraces on the plains.
 const dm = new Uint16Array(nx * nz)
@@ -597,6 +601,7 @@ await writeFile(`${OUT}/elevation.bin`, dm)
 await writeFile(`${OUT}/detail.bin`, detail)
 await writeFile(`${OUT}/masks.bin`, masks)
 await writeFile(`${OUT}/cover.bin`, cover)
+await writeFile(`${OUT}/crops.bin`, crops)
 await writeFile(`${OUT}/verdor.bin`, verdor)
 await writeFile(`${OUT}/quemas.bin`, quemas)
 await writeFile(
@@ -618,6 +623,7 @@ console.log(`elevation ${lo.toFixed(0)}–${hi.toFixed(0)} m, Cota base ${BASE} 
 const share = [0, 0, 0, 0]
 for (let i = 0; i < cover.length; i++) share[i % 4] += cover[i] / 255 / (nx * nz)
 console.log(`cobertura: árbol ${(share[0] * 100).toFixed(1)}%, matorral ${(share[1] * 100).toFixed(1)}%, humedal ${(share[2] * 100).toFixed(1)}%, desnudo ${(share[3] * 100).toFixed(1)}%`)
+console.log(`cultivo: ${((crops.reduce((s, v) => s + v, 0) / 255 / (nx * nz)) * 100).toFixed(1)}% of the Mapa`)
 const burnt = quemas.reduce((n, v) => n + (v ? 1 : 0), 0)
 console.log(`quemas: ${((burnt / (nx * nz)) * 100).toFixed(1)}% of the Mapa burns most years`)
 for (const r of rivers) console.log(`  ${r.name}: ${r.lines.length} line(s), ${r.lines.reduce((s, l) => s + l.length, 0)} points`)

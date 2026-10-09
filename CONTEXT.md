@@ -59,8 +59,12 @@ _Avoid_: vado, crossing, paso
 ### Vegetación
 
 **Cobertura**:
-La proporción de árbol, matorral, hierba, suelo desnudo y humedal en cada punto del Mapa, derivada exclusivamente de un mapa de cobertura real, sin manchas añadidas a mano.
+La proporción de árbol, matorral, hierba, Cultivo, suelo desnudo y humedal en cada punto del Mapa, derivada exclusivamente de un mapa de cobertura real, sin manchas añadidas a mano.
 _Avoid_: woodland, máscara de bosque, landcover
+
+**Cultivo**:
+Tierra de labor fuera de las áreas protegidas, sobre todo al oeste del Serengeti, al norte del Mara y en torno a Karatu. Se dibuja como un mosaico de parcelas de tierra roja, rastrojo y, con las lluvias, cosecha verde. Su borde marca el límite del parque.
+_Avoid_: farmland, agricultura, campos
 
 **Verdor**:
 Lo verde que está la vegetación en cada punto del Mapa en cada mes de un año medio, medido por satélite, no simulado a partir de la lluvia. Cambia a manchas: cada sitio pasa de un mes al siguiente en su propio momento.
