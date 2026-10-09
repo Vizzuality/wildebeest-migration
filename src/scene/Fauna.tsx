@@ -89,6 +89,13 @@ const LANE_FULL = 25
  */
 const ROUND_MONTHS = 0.15
 /**
+ * The width across the way follows the line the way runs along, so the whole body changes shape
+ * when it turns. Setting off from a stay it swings from the pool's facing to the way out; that
+ * swing is spread over this many months (one sigma) so the body reshapes gently, however fast it
+ * sets off.
+ */
+const TURN_MONTHS = 0.12
+/**
  * A real crossing is a single gentle bank a few hundred metres wide, so the Manada funnels into
  * it: within NECK_REACH km of where the way crosses a main river its lanes close in, down to
  * NECK_MIN of their width on the river itself.
@@ -388,7 +395,7 @@ void main() {
  * The Recorrido as the Manada follows it and, at each sample, how open it is (1 away from the
  * rivers) and which way it faces (unit x, z).
  */
-type Way = FaunaBake & { neck: number[]; facing: [number, number][]; room: number[] }
+type Way = FaunaBake & { neck: number[]; facing: [number, number][]; heading: [number, number][]; room: number[] }
 
 function crosses(a: [number, number], b: [number, number], c: [number, number], d: [number, number]) {
   const side = (p: [number, number], q: [number, number], r: [number, number]) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
@@ -536,11 +543,13 @@ function rounded(bake: FaunaBake, rivers: RiverLine[]): Way {
     return [x / total, z / total] as [number, number]
   })
   const recorrido = agolpar(blurred, bake.samplesPerMonth, rivers)
+  const facing = facings({ ...bake, recorrido })
   return {
     ...bake,
     recorrido,
     neck: necks(recorrido, rivers),
-    facing: facings({ ...bake, recorrido }),
+    facing,
+    heading: headings({ ...bake, recorrido }, facing),
     room: rooms(recorrido, rivers),
   }
 }
@@ -569,6 +578,37 @@ function facings(bake: FaunaBake) {
   return facing
 }
 
+/**
+ * The line the way runs along at each sample, as a doubled angle (cos 2θ, sin 2θ): still, the
+ * velocity left is noise pointing anywhere, so below a walk the pool's facing rules. Blurred over
+ * the year so the turn between them is gentle. A line, not a direction, so setting off back the
+ * way it came (as from the Mara) is no turn at all rather than a swing through the side.
+ */
+function headings(bake: FaunaBake, facing: [number, number][]) {
+  const spm = bake.samplesPerMonth
+  const n = bake.recorrido.length
+  const raw = bake.recorrido.map((_, i) => {
+    const [vx, vz] = velocityAt(bake, i / spm)
+    const pace = Math.hypot(vx, vz)
+    const [dx, dz] = pace > LANE_FROM ? [vx / pace, vz / pace] : facing[i]
+    return [dx * dx - dz * dz, 2 * dx * dz]
+  })
+  const sigma = TURN_MONTHS * spm
+  const reach = Math.ceil(sigma * 3)
+  return raw.map((_, i) => {
+    let x = 0
+    let z = 0
+    for (let k = -reach; k <= reach; k++) {
+      const w = Math.exp(-0.5 * (k / sigma) ** 2)
+      const [dx, dz] = raw[(((i + k) % n) + n) % n]
+      x += dx * w
+      z += dz * w
+    }
+    const l = Math.hypot(x, z) || 1
+    return [x / l, z / l] as [number, number]
+  })
+}
+
 function sampleAt<T>(way: Way, samples: T[], month: number): [T, T, number] {
   const n = samples.length
   const f = (((month * way.samplesPerMonth) % n) + n) % n
@@ -586,8 +626,8 @@ function roomAt(way: Way, month: number) {
   return a + (b - a) * w
 }
 
-function facingAt(way: Way, month: number): [number, number] {
-  const [a, b, w] = sampleAt(way, way.facing, month)
+function directionAt(way: Way, samples: [number, number][], month: number): [number, number] {
+  const [a, b, w] = sampleAt(way, samples, month)
   const x = a[0] + (b[0] - a[0]) * w
   const z = a[1] + (b[1] - a[1]) * w
   const l = Math.hypot(x, z) || 1
@@ -639,16 +679,14 @@ function spot(bake: Way, drop: Drop, t: number, clock: number, open = neckAt(bak
   const [sx, sz] = recorridoAt(bake, t)
   const [vx, vz] = velocityAt(bake, t)
   const pace = Math.hypot(vx, vz)
-  const [fx, fz] = facingAt(bake, t)
-  // Still, the velocity left is noise pointing anywhere: below a walk the pool's facing rules.
-  // It turns from one to the other the short way round, since the width across the way (and so
-  // the whole body) follows this direction.
-  const facing = Math.atan2(fz, fx)
-  const going = Math.atan2(vz, vx)
-  const turn = THREE.MathUtils.euclideanModulo(going - facing + Math.PI, 2 * Math.PI) - Math.PI
-  const heading = facing + turn * THREE.MathUtils.smoothstep(pace, LANE_FROM / 2, LANE_FROM)
-  const tx = Math.cos(heading)
-  const tz = Math.sin(heading)
+  const [fx, fz] = directionAt(bake, bake.facing, t)
+  // Back from the doubled angle to the line, pointed the way the Manada is going.
+  const [cx, cz] = directionAt(bake, bake.heading, t)
+  const angle = Math.atan2(cz, cx) / 2
+  const [ox0, oz0] = pace > LANE_FROM ? [vx, vz] : [fx, fz]
+  const sense = Math.cos(angle) * ox0 + Math.sin(angle) * oz0 < 0 ? -1 : 1
+  const tx = Math.cos(angle) * sense
+  const tz = Math.sin(angle) * sense
   const squeeze = (SPREAD / (1 + pace / SQUEEZE_KM_PER_MONTH)) * (NECK_MIN + (1 - NECK_MIN) * open)
   const [xx, xz, zz] = formaAt(bake.forma, t)
   const geo = Math.sqrt(Math.sqrt(Math.max(xx * zz - xz * xz, 1e-6)))
