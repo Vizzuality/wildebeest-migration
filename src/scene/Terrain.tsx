@@ -3,7 +3,7 @@ import * as THREE from 'three'
 import { MAP, project } from '../geo'
 import { GLSL_COMMON, shared } from '../shaders/common'
 import { RIVER_GLSL, riverUniforms } from '../shaders/rivers'
-import { useHeightfield, type Heightfield } from '../terrain'
+import { mipmapped, useHeightfield, type Heightfield } from '../terrain'
 import { HORIZON } from './Sky'
 
 /**
@@ -203,7 +203,7 @@ function buildGeometry({ nx, nz, step, heights }: Heightfield) {
 
 /** Half float so lighting does not band on the plains, where normals barely tilt. */
 function normalTexture({ nx, nz, normals, detail }: Heightfield) {
-  return linear(new THREE.DataTexture(normals, (nx - 1) * detail + 1, (nz - 1) * detail + 1, THREE.RGFormat, THREE.HalfFloatType))
+  return mipmapped(new THREE.DataTexture(normals, (nx - 1) * detail + 1, (nz - 1) * detail + 1, THREE.RGFormat, THREE.HalfFloatType))
 }
 
 function lakeTexture({ nx, nz, masks }: Heightfield) {
@@ -211,25 +211,18 @@ function lakeTexture({ nx, nz, masks }: Heightfield) {
   for (let i = 0; i < nx * nz; i++) data[i] = Math.round(masks[i * 2 + 1] * 255)
   const tex = new THREE.DataTexture(data, nx, nz, THREE.RedFormat)
   tex.unpackAlignment = 1
-  return linear(tex)
+  return mipmapped(tex)
 }
 
 /** Cobertura at the detail's resolution: a 300 m cell would smear every thicket into its neighbours. */
 function coverTexture({ nx, nz, detail, coverDetail }: Heightfield) {
-  return linear(new THREE.DataTexture(coverDetail, (nx - 1) * detail + 1, (nz - 1) * detail + 1, THREE.RGBAFormat))
+  return mipmapped(new THREE.DataTexture(coverDetail, (nx - 1) * detail + 1, (nz - 1) * detail + 1, THREE.RGBAFormat))
 }
 
 function cropsTexture({ nx, nz, detail, cropsDetail }: Heightfield) {
   const tex = new THREE.DataTexture(cropsDetail, (nx - 1) * detail + 1, (nz - 1) * detail + 1, THREE.RedFormat)
   tex.unpackAlignment = 1
-  return linear(tex)
-}
-
-function linear(tex: THREE.DataTexture) {
-  tex.minFilter = THREE.LinearFilter
-  tex.magFilter = THREE.LinearFilter
-  tex.needsUpdate = true
-  return tex
+  return mipmapped(tex)
 }
 
 export function Terrain() {

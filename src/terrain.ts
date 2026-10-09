@@ -142,27 +142,33 @@ async function fetchHeightfield(): Promise<Heightfield> {
   }
 }
 
+/**
+ * Mipmapped so distant ground averages its texels instead of skipping them, which shimmers as
+ * the camera moves; anisotropic so the view at a slant stays sharp instead of smearing.
+ */
+export function mipmapped(tex: THREE.DataTexture) {
+  tex.minFilter = THREE.LinearMipmapLinearFilter
+  tex.magFilter = THREE.LinearFilter
+  tex.generateMipmaps = true
+  tex.anisotropy = 8
+  tex.needsUpdate = true
+  return tex
+}
+
 /** Twelve months of Verdor per cell, split across three RGBA textures (four months each). */
 function verdorTextures(verdor: Uint8Array, nx: number, nz: number) {
   return [0, 1, 2].map((k) => {
     const data = new Uint8Array(nx * nz * 4)
     for (let i = 0; i < nx * nz; i++) for (let c = 0; c < 4; c++) data[i * 4 + c] = verdor[i * 12 + k * 4 + c]
-    const tex = new THREE.DataTexture(data, nx, nz, THREE.RGBAFormat)
-    tex.minFilter = THREE.LinearFilter
-    tex.magFilter = THREE.LinearFilter
-    tex.needsUpdate = true
-    return tex
+    return mipmapped(new THREE.DataTexture(data, nx, nz, THREE.RGBAFormat))
   })
 }
 
 /** Per detail cell: sun past the Relieve (R) and open sky (G), from bakeRelief. */
 function reliefTexture(relief: Uint8Array, nx: number, nz: number) {
   const tex = new THREE.DataTexture(relief, nx, nz, THREE.RGFormat)
-  tex.minFilter = THREE.LinearFilter
-  tex.magFilter = THREE.LinearFilter
   tex.unpackAlignment = 2
-  tex.needsUpdate = true
-  return tex
+  return mipmapped(tex)
 }
 
 /** Usual month of each cell's Quema (1–12, 0 = none). Nearest filtering: months don't blend. */
