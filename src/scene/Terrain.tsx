@@ -67,7 +67,7 @@ void main() {
   float g = greenOf(verdor(xz, order));
 
   // Hierba swings hardest with the rain: straw in the dry season, fresh green in the rains.
-  vec3 straw = mix(srgb(vec3(0.78, 0.65, 0.42)), srgb(vec3(0.66, 0.53, 0.33)), 0.4 + 0.25 * n2);
+  vec3 straw = mix(srgb(vec3(0.78, 0.62, 0.50)), srgb(vec3(0.66, 0.52, 0.41)), 0.4 + 0.25 * n2);
   vec3 fresh = mix(srgb(vec3(0.41, 0.54, 0.36)), srgb(vec3(0.32, 0.47, 0.27)), 0.4 + 0.25 * n2);
   vec3 grassCol = mix(straw, fresh, g) * (0.96 + 0.05 * n3);
   // Matorral only half follows it: grey-brown Commiphora thorn at worst, dull olive at best.
