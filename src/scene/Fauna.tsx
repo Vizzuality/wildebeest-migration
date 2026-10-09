@@ -657,8 +657,14 @@ function spot(bake: Way, drop: Drop, t: number, clock: number, open = neckAt(bak
   const pace = Math.hypot(vx, vz)
   const [fx, fz] = facingAt(bake, t)
   // Still, the velocity left is noise pointing anywhere: below a walk the pool's facing rules.
-  const tx = pace > LANE_FROM ? vx / pace : fx
-  const tz = pace > LANE_FROM ? vz / pace : fz
+  // It turns from one to the other the short way round, since the width across the way (and so
+  // the whole body) follows this direction.
+  const facing = Math.atan2(fz, fx)
+  const going = Math.atan2(vz, vx)
+  const turn = THREE.MathUtils.euclideanModulo(going - facing + Math.PI, 2 * Math.PI) - Math.PI
+  const heading = facing + turn * THREE.MathUtils.smoothstep(pace, LANE_FROM / 2, LANE_FROM)
+  const tx = Math.cos(heading)
+  const tz = Math.sin(heading)
   const squeeze = (SPREAD / (1 + pace / SQUEEZE_KM_PER_MONTH)) * (NECK_MIN + (1 - NECK_MIN) * open)
   const [xx, xz, zz] = formaAt(bake.forma, t)
   const geo = Math.sqrt(Math.sqrt(Math.max(xx * zz - xz * xz, 1e-6)))
