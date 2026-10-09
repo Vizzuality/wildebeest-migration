@@ -72,6 +72,12 @@ const CHAIN_TAIL = 0.45
 const CHAIN_POINTS = 13
 const CHAIN_WIDTH = 3
 /**
+ * Pooled, the Presencia and the stretch of the way add up and the rim sits well out; streaming,
+ * the stretch is all there is and its middle only just tops the rim. It runs this much deeper on
+ * the move so the stream reads about as broad as it is.
+ */
+const STREAM_DEPTH = 1.8
+/**
  * On the move each drop keeps its own lane beside the way, across it rather than along the
  * map's axes, so a turn does not swap the drops from one side of the stream to the other. The
  * lane takes over from the pool's spread between these paces (km/month).
@@ -90,7 +96,7 @@ const ROUND_MONTHS = 0.15
  * NECK_MIN of their width on the river itself.
  */
 const NECK_REACH = 30
-const NECK_MIN = 0.12
+const NECK_MIN = 0.5
 /**
  * Each drop takes its own line through the year: it drifts across the stream by up to about
  * WANDER_SIDE of the Presencia's width, and up to about WANDER_LAG months ahead or behind its usual
@@ -333,7 +339,7 @@ void main() {
       }
     }
     if (best < 6.0) {
-      float w = exp(-best);
+      float w = exp(-best) * mix(1.0, ${STREAM_DEPTH.toFixed(2)}, uMotion);
       field += w;
       grad -= bestAway * w;
     }
