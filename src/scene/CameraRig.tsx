@@ -22,7 +22,7 @@ const LAG_MONTHS = 0.7
 const BREATHE_MONTHS = 1.4
 /** Ground kept in frame round the Manada: its spread (in σ) plus a margin of land (km). */
 const SPREAD_SIGMAS = 0.9
-const MARGIN_KM = 14
+const MARGIN_KM = 40
 /** How far the camera swings off due south (radians), and how often (cycles a year). */
 const SWAY = THREE.MathUtils.degToRad(22)
 const SWAYS_PER_YEAR = 2
