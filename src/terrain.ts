@@ -50,6 +50,9 @@ export interface Heightfield {
   cover: Float32Array
   /** Per vertex share of Cultivo (0–1), which `cover` counts inside hierba. */
   crops: Float32Array
+  /** `cover` and `crops` at `detail`× the grid's resolution, as bytes, for the ground to paint from. */
+  coverDetail: Uint8Array
+  cropsDetail: Uint8Array
   /** Per vertex: distance to nearest river (km), lake (0/1). */
   masks: Float32Array
   /** Ground normals at `detail`× the grid's resolution: half-float x, z per cell. */
@@ -93,7 +96,7 @@ async function fetchHeightfield(): Promise<Heightfield> {
     toHeights(meta, elevation),
   )
   const detailP = fetchOk('/terrain/detail.bin').then((r) => r.arrayBuffer())
-  const [meta, heights, { relief, normals }, rawMasks, rawCover, rawCrops, rawVerdor, rawQuemas] = await Promise.all([
+  const [meta, heights, { relief, normals }, rawMasks, rawCover, rawCrops, rawVerdor, rawQuemas, rawCoverDetail, rawCropsDetail] = await Promise.all([
     metaP,
     heightsP,
     Promise.all([heightsP, detailP, metaP]).then(([h, detail, meta]) => reliefInWorker(h, new Int8Array(detail), meta)),
@@ -102,6 +105,8 @@ async function fetchHeightfield(): Promise<Heightfield> {
     fetchOk('/terrain/crops.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/verdor.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/quemas.bin').then((r) => r.arrayBuffer()),
+    fetchOk('/terrain/cover-detail.bin').then((r) => r.arrayBuffer()),
+    fetchOk('/terrain/crops-detail.bin').then((r) => r.arrayBuffer()),
   ])
   if (meta.minX !== MAP.minX || meta.minZ !== MAP.minZ) throw new Error('terrain bake does not match MAP, run pnpm bake:terrain')
 
@@ -127,7 +132,9 @@ async function fetchHeightfield(): Promise<Heightfield> {
   shared.uQuemaMask.value = quemaMaskTexture(new Uint8Array(rawQuemas), nx, nz)
   shared.uRelief.value = reliefTexture(relief, (nx - 1) * meta.detail + 1, (nz - 1) * meta.detail + 1)
 
-  const hf = { nx, nz, step, heights, cover, crops, masks, normals, detail: meta.detail }
+  const coverDetail = new Uint8Array(rawCoverDetail)
+  const cropsDetail = new Uint8Array(rawCropsDetail)
+  const hf = { nx, nz, step, heights, cover, crops, coverDetail, cropsDetail, masks, normals, detail: meta.detail }
   return {
     ...hf,
     rivers: meta.rivers.flatMap((r) => r.lines.map((points) => ({ name: r.name, kind: r.kind, points }))),

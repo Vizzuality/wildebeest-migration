@@ -29,9 +29,9 @@ ${RIVER_GLSL}
 uniform vec2 uCrater;
 uniform vec2 uCraterLake;
 uniform sampler2D uNormal;
-uniform float uDetail;
-uniform sampler2D uGround;
+uniform sampler2D uLake;
 uniform sampler2D uCover;
+uniform sampler2D uCrops;
 varying vec3 vWorld;
 
 // Tree crowns as a mask whose area matches the Cobertura's tree share. Each scale of clumping
@@ -49,18 +49,18 @@ float canopy(vec2 xz, float tree, float fw) {
 void main() {
   vec2 xz = vWorld.xz;
   vec2 grid = gridUv(xz);
-  vec2 sideways = texture2D(uNormal, ((xz - uMapMin) / uMapStep * uDetail + 0.5) / vec2(textureSize(uNormal, 0))).xy;
+  vec2 fine = detailUv(xz, textureSize(uNormal, 0));
+  vec2 sideways = texture2D(uNormal, fine).xy;
   vec3 N = normalize(vec3(sideways.x, sqrt(max(0.0, 1.0 - dot(sideways, sideways))), sideways.y));
-  vec4 cover = texture2D(uCover, grid);
-  vec2 ground = texture2D(uGround, grid).rg;
+  vec4 cover = texture2D(uCover, fine);
   float tree = cover.x;
   float shrub = cover.y;
   float wet = cover.z;
   float bare = cover.w;
   float grass = max(0.0, 1.0 - tree - shrub - wet - bare);
-  float crop = min(ground.y, grass);
+  float crop = min(texture2D(uCrops, fine).r, grass);
   grass -= crop;
-  float lake = ground.x;
+  float lake = texture2D(uLake, grid).r;
   float fw = length(fwidth(xz));
 
   float n2 = tnoise(xz * 0.35 + 3.0);
@@ -206,20 +206,23 @@ function normalTexture({ nx, nz, normals, detail }: Heightfield) {
   return linear(new THREE.DataTexture(normals, (nx - 1) * detail + 1, (nz - 1) * detail + 1, THREE.RGFormat, THREE.HalfFloatType))
 }
 
-/** Per grid vertex: lake (R) and Cultivo (G). */
-function groundTexture({ nx, nz, masks, crops }: Heightfield) {
-  const data = new Uint8Array(nx * nz * 2)
-  for (let i = 0; i < nx * nz; i++) {
-    data[i * 2] = Math.round(masks[i * 2 + 1] * 255)
-    data[i * 2 + 1] = Math.round(crops[i] * 255)
-  }
-  const tex = new THREE.DataTexture(data, nx, nz, THREE.RGFormat)
-  tex.unpackAlignment = 2
+function lakeTexture({ nx, nz, masks }: Heightfield) {
+  const data = new Uint8Array(nx * nz)
+  for (let i = 0; i < nx * nz; i++) data[i] = Math.round(masks[i * 2 + 1] * 255)
+  const tex = new THREE.DataTexture(data, nx, nz, THREE.RedFormat)
+  tex.unpackAlignment = 1
   return linear(tex)
 }
 
-function coverTexture({ nx, nz, cover }: Heightfield) {
-  return linear(new THREE.DataTexture(Uint8Array.from(cover, (v) => Math.round(v * 255)), nx, nz, THREE.RGBAFormat))
+/** Cobertura at the detail's resolution: a 300 m cell would smear every thicket into its neighbours. */
+function coverTexture({ nx, nz, detail, coverDetail }: Heightfield) {
+  return linear(new THREE.DataTexture(coverDetail, (nx - 1) * detail + 1, (nz - 1) * detail + 1, THREE.RGBAFormat))
+}
+
+function cropsTexture({ nx, nz, detail, cropsDetail }: Heightfield) {
+  const tex = new THREE.DataTexture(cropsDetail, (nx - 1) * detail + 1, (nz - 1) * detail + 1, THREE.RedFormat)
+  tex.unpackAlignment = 1
+  return linear(tex)
 }
 
 function linear(tex: THREE.DataTexture) {
@@ -243,9 +246,9 @@ export function Terrain() {
           uCrater: { value: new THREE.Vector2(...CRATER) },
           uCraterLake: { value: new THREE.Vector2(...CRATER_LAKE) },
           uNormal: { value: normalTexture(hf) },
-          uDetail: { value: hf.detail },
-          uGround: { value: groundTexture(hf) },
+          uLake: { value: lakeTexture(hf) },
           uCover: { value: coverTexture(hf) },
+          uCrops: { value: cropsTexture(hf) },
         },
       }),
     [hf],

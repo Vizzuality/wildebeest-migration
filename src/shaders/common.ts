@@ -115,11 +115,12 @@ float rainN(float month) {
 float northness(float z) { return smoothstep(80.0, -110.0, z); }
 float rainAt(float z, float month) { return mix(rainS(month), rainN(month), northness(z)); }
 vec2 gridUv(vec2 xz) { return ((xz - uMapMin) / uMapStep + 0.5) / uGrid; }
-// uRelief is baked finer than the grid, on the same corners.
-vec2 reliefUv(vec2 xz) {
-  vec2 size = vec2(textureSize(uRelief, 0));
+// For textures baked finer than the grid, on the same corners.
+vec2 detailUv(vec2 xz, ivec2 texels) {
+  vec2 size = vec2(texels);
   return ((xz - uMapMin) / uMapStep * (size - 1.0) / (uGrid - 1.0) + 0.5) / size;
 }
+vec2 reliefUv(vec2 xz) { return detailUv(xz, textureSize(uRelief, 0)); }
 
 float verdorIn(vec2 uv, int month) {
   int m = wrap12(month);
