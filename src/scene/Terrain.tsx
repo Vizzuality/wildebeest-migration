@@ -6,22 +6,20 @@ import { RIVER_GLSL, riverUniforms } from '../shaders/rivers'
 import { useHeightfield, type Heightfield } from '../terrain'
 import { HORIZON } from './Sky'
 
+/**
+ * The mesh keeps one vertex in STRIDE each way. At full resolution most triangles were smaller
+ * than a pixel, and the GPU shades every triangle in 2×2 blocks, so the ground shader ran several
+ * times per pixel. Normals, Cobertura and lakes come from full-resolution textures instead, so
+ * the shading keeps every gully.
+ */
+const STRIDE = 2
+
 const vertex = /* glsl */ `
-${GLSL_COMMON}
-attribute vec4 aCover;
-attribute vec2 aMask;
 varying vec3 vWorld;
-varying vec3 vNormal;
-varying vec4 vCover;
-varying vec2 vMask;
 void main() {
   vec4 world = modelMatrix * vec4(position, 1.0);
   vWorld = world.xyz;
-  vNormal = normal;
-  vCover = aCover;
-  vMask = aMask;
-  vec4 mvPosition = viewMatrix * world;
-  gl_Position = projectionMatrix * mvPosition;
+  gl_Position = projectionMatrix * viewMatrix * world;
 }
 `
 
@@ -30,10 +28,9 @@ ${GLSL_COMMON}
 ${RIVER_GLSL}
 uniform vec2 uCrater;
 uniform vec2 uCraterLake;
+uniform sampler2D uSurface;
+uniform sampler2D uCover;
 varying vec3 vWorld;
-varying vec3 vNormal;
-varying vec4 vCover;
-varying vec2 vMask;
 
 // Tree crowns as a mask whose area matches the Cobertura's tree share. Each scale of clumping
 // fades out once it is smaller than a pixel, so far away it settles on the plain average.
@@ -48,14 +45,17 @@ float canopy(vec2 xz, float tree, float fw) {
 }
 
 void main() {
-  vec3 N = normalize(vNormal);
   vec2 xz = vWorld.xz;
-  float tree = clamp(vCover.x, 0.0, 1.0);
-  float shrub = clamp(vCover.y, 0.0, 1.0);
-  float wet = clamp(vCover.z, 0.0, 1.0);
-  float bare = clamp(vCover.w, 0.0, 1.0);
+  vec2 grid = gridUv(xz);
+  vec4 surface = texture2D(uSurface, grid);
+  vec4 cover = texture2D(uCover, grid);
+  vec3 N = normalize(surface.xyz);
+  float tree = cover.x;
+  float shrub = cover.y;
+  float wet = cover.z;
+  float bare = cover.w;
   float grass = max(0.0, 1.0 - tree - shrub - wet - bare);
-  float lake = vMask.y;
+  float lake = surface.w;
   float fw = length(fwidth(xz));
 
   float n2 = tnoise(xz * 0.35 + 3.0);
@@ -147,7 +147,25 @@ void main() {
 const CRATER = project([35.575, -3.18])
 const CRATER_LAKE = project([35.536, -3.193])
 
-function buildGeometry({ nx, nz, step, heights, cover, masks }: Heightfield) {
+function gridIndex(nx: number, nz: number, stride: number) {
+  const cols = Math.floor((nx - 1) / stride)
+  const rows = Math.floor((nz - 1) / stride)
+  const index = new Uint32Array(cols * rows * 6)
+  let k = 0
+  for (let iz = 0; iz < rows * stride; iz += stride) {
+    for (let ix = 0; ix < cols * stride; ix += stride) {
+      const a = iz * nx + ix
+      const b = a + stride
+      const c = a + stride * nx
+      const d = c + stride
+      index[k++] = a; index[k++] = c; index[k++] = b
+      index[k++] = b; index[k++] = c; index[k++] = d
+    }
+  }
+  return index
+}
+
+function buildGeometry({ nx, nz, step, heights }: Heightfield) {
   const pos = new Float32Array(nx * nz * 3)
   for (let iz = 0; iz < nz; iz++) {
     for (let ix = 0; ix < nx; ix++) {
@@ -157,31 +175,43 @@ function buildGeometry({ nx, nz, step, heights, cover, masks }: Heightfield) {
       pos[i * 3 + 2] = MAP.minZ + iz * step
     }
   }
-  const index = new Uint32Array((nx - 1) * (nz - 1) * 6)
-  let k = 0
-  for (let iz = 0; iz < nz - 1; iz++) {
-    for (let ix = 0; ix < nx - 1; ix++) {
-      const a = iz * nx + ix
-      const b = a + 1
-      const c = a + nx
-      const d = c + 1
-      index[k++] = a; index[k++] = c; index[k++] = b
-      index[k++] = b; index[k++] = c; index[k++] = d
-    }
-  }
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
-  geo.setAttribute('aCover', new THREE.BufferAttribute(cover, 4))
-  geo.setAttribute('aMask', new THREE.BufferAttribute(masks, 2))
-  geo.setIndex(new THREE.BufferAttribute(index, 1))
+  geo.setIndex(new THREE.BufferAttribute(gridIndex(nx, nz, 1), 1))
   geo.computeVertexNormals()
+  const normals = geo.getAttribute('normal').array as Float32Array
+  geo.deleteAttribute('normal')
+  geo.setIndex(new THREE.BufferAttribute(gridIndex(nx, nz, STRIDE), 1))
   geo.computeBoundingSphere()
-  return geo
+  return { geo, normals }
+}
+
+/** Normal and lake share per grid vertex, half float so lighting does not band. */
+function surfaceTexture({ nx, nz, masks }: Heightfield, normals: Float32Array) {
+  const data = new Uint16Array(nx * nz * 4)
+  for (let i = 0; i < nx * nz; i++) {
+    data[i * 4] = THREE.DataUtils.toHalfFloat(normals[i * 3])
+    data[i * 4 + 1] = THREE.DataUtils.toHalfFloat(normals[i * 3 + 1])
+    data[i * 4 + 2] = THREE.DataUtils.toHalfFloat(normals[i * 3 + 2])
+    data[i * 4 + 3] = THREE.DataUtils.toHalfFloat(masks[i * 2 + 1])
+  }
+  return linear(new THREE.DataTexture(data, nx, nz, THREE.RGBAFormat, THREE.HalfFloatType))
+}
+
+function coverTexture({ nx, nz, cover }: Heightfield) {
+  return linear(new THREE.DataTexture(Uint8Array.from(cover, (v) => Math.round(v * 255)), nx, nz, THREE.RGBAFormat))
+}
+
+function linear(tex: THREE.DataTexture) {
+  tex.minFilter = THREE.LinearFilter
+  tex.magFilter = THREE.LinearFilter
+  tex.needsUpdate = true
+  return tex
 }
 
 export function Terrain() {
   const hf = useHeightfield()
-  const geometry = useMemo(() => buildGeometry(hf), [hf])
+  const { geo: geometry, normals } = useMemo(() => buildGeometry(hf), [hf])
   const material = useMemo(
     () =>
       new THREE.ShaderMaterial({
@@ -192,9 +222,11 @@ export function Terrain() {
           ...riverUniforms,
           uCrater: { value: new THREE.Vector2(...CRATER) },
           uCraterLake: { value: new THREE.Vector2(...CRATER_LAKE) },
+          uSurface: { value: surfaceTexture(hf, normals) },
+          uCover: { value: coverTexture(hf) },
         },
       }),
-    [],
+    [hf, normals],
   )
   return (
     <>
