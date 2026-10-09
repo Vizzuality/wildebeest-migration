@@ -41,8 +41,6 @@ const EDGE_FULL = 1.4
 const CROWD_FROM = 2
 const CROWD_FULL = 9
 const CROWD_GLOW = 0.12
-/** How fast the streaks run down the Manada on the move (km a second at full pace). */
-const FLOW_KM_PER_S = 1.2
 /**
  * The liquid runs out over green, level grass and draws back off slopes and bare ground, so its
  * edge follows the land it crosses: the field is raised to 1 / land, land running from LAND_POOR
@@ -233,11 +231,8 @@ const uniforms = {
   uChain: { value: Array.from({ length: DROPS * CHAIN_POINTS }, () => new THREE.Vector3()) },
   uOrigin: { value: new THREE.Vector2() },
   uSize: { value: 1 },
-  /** How much the Manada is on the move (0 pooled, 1 streaming) and which way. */
+  /** How much the Manada is on the move (0 pooled, 1 streaming). */
   uMotion: { value: 0 },
-  uHeading: { value: new THREE.Vector2(0, 1) },
-  /** How far the streaks on its surface have run (km). */
-  uFlow: { value: 0 },
 }
 
 const vertex = /* glsl */ `
@@ -263,8 +258,6 @@ uniform vec3 uAxes[${DROPS}];
 uniform vec3 uSpine[${DROPS}];
 uniform vec3 uChain[${DROPS * CHAIN_POINTS}];
 uniform float uMotion;
-uniform vec2 uHeading;
-uniform float uFlow;
 varying vec2 vWorld;
 varying float vHeight;
 
@@ -361,32 +354,23 @@ void main() {
   float body = smoothstep(${EDGE_FROM.toFixed(2)}, ${EDGE_FULL.toFixed(2)}, field);
   float alpha = edge * 0.9;
   if (alpha < 0.005) discard;
-  // At a third of the distance, so swirls and streaks stay broad across the body.
+  // At a third of the distance, so the swirls stay broad across the body.
   local *= 0.33 / max(near, 1e-6);
 
-  // On the move streaks run back down the Manada from its head, faster down its middle than at its
-  // edges, as in a river; pooled they slow to a lazy swirl.
-  vec2 across = vec2(-uHeading.y, uHeading.x);
-  vec2 run = vec2(dot(local, uHeading), dot(local, across));
-  float shear = uFlow * (0.4 + 0.6 * body);
-  vec2 streakAt = vec2(run.x * 0.5 + shear, run.y * 2.5);
+  // A lazy swirl over the surface, all year round.
   vec2 swirlAt = local * 0.6 + vec2(uClock * 0.05, -uClock * 0.04);
-  float streak = mix(tnoise(swirlAt), tnoise(streakAt), uMotion);
-  float ahead = mix(tnoise(swirlAt + vec2(0.4, 0.0)), tnoise(streakAt + vec2(0.4, 0.0)), uMotion);
-  float aside = mix(tnoise(swirlAt + vec2(0.0, 0.4)), tnoise(streakAt + vec2(0.0, 0.4)), uMotion);
-  vec2 ripple = ((ahead - streak) * mix(vec2(1.0, 0.0), uHeading, uMotion) + (aside - streak) * mix(vec2(0.0, 1.0), across, uMotion)) * body * body;
+  float swirl = tnoise(swirlAt);
+  vec2 ripple = vec2(tnoise(swirlAt + vec2(0.4, 0.0)) - swirl, tnoise(swirlAt + vec2(0.0, 0.4)) - swirl) * body * body;
 
   // The surface bulges a little where the liquid runs deep, and ripples, so the sun models it.
   vec3 normal = normalize(vec3(-grad.x * 0.6 - ripple.x * 1.5, 1.0, -grad.y * 0.6 - ripple.y * 1.5));
   // Apiñamiento: the more drops pile up on a point, the more packed the Manada is there.
   float crowd = smoothstep(${CROWD_FROM.toFixed(1)}, ${CROWD_FULL.toFixed(1)}, field);
-  // Pooled it packs warm round its middle; streaming it runs dark and thin.
-  float pooled = (1.0 - uMotion) * smoothstep(0.6, 2.6, field);
-  crowd = max(crowd, pooled);
+  // It packs warm round its middle, pooled or on the move.
+  crowd = max(crowd, smoothstep(0.6, 2.6, field));
   float grain = tnoise(local * 3.0) * 0.5 + tnoise(local * 9.0) * 0.3;
   vec3 albedo = mix(vec3(0.2, 0.16, 0.12), vec3(0.38, 0.2, 0.08), crowd);
-  albedo = mix(albedo, vec3(0.13, 0.1, 0.08), uMotion * 0.6);
-  albedo *= 1.0 + grain * 0.18 + streak * 0.35 * uMotion;
+  albedo *= 1.0 + grain * 0.18;
   vec3 lit = sunlight(srgb(albedo), normal, cloudShadow(vWorld));
   // Packed tight it glows a little on top of the light, so the crowd reads even in shadow.
   lit += srgb(vec3(0.62, 0.3, 0.08)) * crowd * crowd * ${CROWD_GLOW.toFixed(2)} * body;
@@ -714,8 +698,6 @@ function place(bake: Way, hf: Heightfield, all: Drop[], month: number, clock: nu
   let maxZ = -Infinity
   let biggest = 0
   let motion = 0
-  let headX = 0
-  let headZ = 0
   const spine: { lag: number; x: number; z: number; r: number }[] = []
   const now = all.map((drop) => {
     const lag = lagAt(drop, month)
@@ -781,11 +763,8 @@ function place(bake: Way, hf: Heightfield, all: Drop[], month: number, clock: nu
       biggest = Math.max(biggest, pr)
     }
     motion += lane / DROPS
-    headX += tx
-    headZ += tz
   })
   uniforms.uMotion.value = motion
-  if (Math.hypot(headX, headZ) > 1e-6) uniforms.uHeading.value.set(headX, headZ).normalize()
   // Drops overtake one another, so the spine is threaded in their order along the stream now.
   spine.sort((a, b) => a.lag - b.lag).forEach((s, k) => uniforms.uSpine.value[k].set(s.x, s.z, s.r))
   // Past ~2.5 radii a drop adds nothing (the shader skips it), so that is all the margin needed.
@@ -868,10 +847,7 @@ export function Fauna() {
   useEffect(() => () => geometry.dispose(), [geometry])
   useEffect(() => () => material.dispose(), [material])
 
-  useFrame((_, delta) => {
-    place(bake, hf, all, useStore.getState().month, shared.uClock.value)
-    uniforms.uFlow.value += delta * uniforms.uMotion.value * FLOW_KM_PER_S
-  })
+  useFrame(() => place(bake, hf, all, useStore.getState().month, shared.uClock.value))
 
   // Well inside one drop, so the point is on the liquid whatever its neighbours do.
   const onMancha = useCallback<OnMancha>(
