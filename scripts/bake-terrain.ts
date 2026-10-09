@@ -16,6 +16,10 @@ import { PNG } from 'pngjs'
 import { KM_PER_DEG, LON0, MAP, project, unproject } from '../src/geo.ts'
 
 const STEP = 0.3
+/** Detail cells per grid cell each way: the z11 tiles hold ~75 m, finer than the 300 m grid. */
+const DETAIL = 2
+/** Detail is stored as metres off the grid's own surface, in these steps (m). */
+const DETAIL_UNIT = 0.5
 const ZOOM = 11
 const TILE = 256
 const CACHE = '.cache/terrain'
@@ -173,6 +177,40 @@ function resample(sample: (lon: number, lat: number) => number) {
         }
       }
       out[iz * nx + ix] = sum / (taps * taps)
+    }
+  }
+  return out
+}
+
+/**
+ * What the grid misses: elevation at DETAIL× the resolution, minus the grid's bilinear surface
+ * there, in DETAIL_UNIT steps. The client adds it back only to shade, so the mesh stays light.
+ */
+function resampleDetail(sample: (lon: number, lat: number) => number, coarse: (ix: number, iz: number) => number) {
+  const dnx = (nx - 1) * DETAIL + 1
+  const dnz = (nz - 1) * DETAIL + 1
+  const out = new Int8Array(dnx * dnz)
+  const taps = 2
+  const step = STEP / DETAIL
+  for (let jz = 0; jz < dnz; jz++) {
+    for (let jx = 0; jx < dnx; jx++) {
+      let sum = 0
+      for (let a = 0; a < taps; a++) {
+        for (let b = 0; b < taps; b++) {
+          const x = MAP.minX + (jx + (a + 0.5) / taps - 0.5) * step
+          const z = MAP.minZ + (jz + (b + 0.5) / taps - 0.5) * step
+          sum += sample(...unproject(x, z))
+        }
+      }
+      const fx = jx / DETAIL
+      const fz = jz / DETAIL
+      const ix = Math.min(nx - 2, Math.floor(fx))
+      const iz = Math.min(nz - 2, Math.floor(fz))
+      const tx = fx - ix
+      const tz = fz - iz
+      const base =
+        (coarse(ix, iz) * (1 - tx) + coarse(ix + 1, iz) * tx) * (1 - tz) + (coarse(ix, iz + 1) * (1 - tx) + coarse(ix + 1, iz + 1) * tx) * tz
+      out[jz * dnx + jx] = Math.max(-127, Math.min(127, Math.round((sum / (taps * taps) - base) / DETAIL_UNIT)))
     }
   }
   return out
@@ -552,14 +590,18 @@ for (let i = 0; i < nx * nz; i++) {
   masks[i * 2 + 1] = lake[i] * 255
 }
 
+console.log(`detail at ${STEP / DETAIL} km`)
+const detail = resampleDetail(sample, (ix, iz) => dm[iz * nx + ix] / 10)
+
 await writeFile(`${OUT}/elevation.bin`, dm)
+await writeFile(`${OUT}/detail.bin`, detail)
 await writeFile(`${OUT}/masks.bin`, masks)
 await writeFile(`${OUT}/cover.bin`, cover)
 await writeFile(`${OUT}/verdor.bin`, verdor)
 await writeFile(`${OUT}/quemas.bin`, quemas)
 await writeFile(
   `${OUT}/terrain.json`,
-  JSON.stringify({ nx, nz, step: STEP, minX: MAP.minX, minZ: MAP.minZ, base: BASE, riverMax: RIVER_MAX, rivers }),
+  JSON.stringify({ nx, nz, step: STEP, detail: DETAIL, detailUnit: DETAIL_UNIT, minX: MAP.minX, minZ: MAP.minZ, base: BASE, riverMax: RIVER_MAX, rivers }),
 )
 
 let lo = Infinity
@@ -568,6 +610,9 @@ for (const e of elev) {
   lo = Math.min(lo, e)
   hi = Math.max(hi, e)
 }
+let clipped = 0
+for (const d of detail) if (Math.abs(d) === 127) clipped++
+console.log(`detail: ${((clipped / detail.length) * 100).toFixed(2)}% clipped at ±${127 * DETAIL_UNIT} m`)
 const lakeCells = lake.reduce((s, v) => s + v, 0)
 console.log(`elevation ${lo.toFixed(0)}–${hi.toFixed(0)} m, Cota base ${BASE} m, lake ${((lakeCells / lake.length) * 100).toFixed(1)}% of the Mapa`)
 const share = [0, 0, 0, 0]

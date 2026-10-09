@@ -1,6 +1,7 @@
 import { use } from 'react'
 import * as THREE from 'three'
 import { MAP } from './geo'
+import type { ReliefJob } from './relief.worker.ts'
 import ReliefWorker from './relief.worker.ts?worker'
 import { SUN_DIR, shared } from './shaders/common'
 
@@ -31,6 +32,8 @@ interface TerrainMeta {
   nx: number
   nz: number
   step: number
+  detail: number
+  detailUnit: number
   minX: number
   minZ: number
   base: number
@@ -47,6 +50,9 @@ export interface Heightfield {
   cover: Float32Array
   /** Per vertex: distance to nearest river (km), lake (0/1). */
   masks: Float32Array
+  /** Ground normals at `detail`× the grid's resolution: half-float x, z per cell. */
+  normals: Uint16Array
+  detail: number
   rivers: RiverLine[]
   heightAt: (x: number, z: number) => number
 }
@@ -61,11 +67,11 @@ function toHeights(meta: TerrainMeta, elevation: ArrayBuffer) {
   return Float32Array.from(new Uint16Array(elevation), (v) => ((v / 10 - meta.base) / 1000) * EXAGGERATION)
 }
 
-/** Runs bakeRelief off the main thread, so it overlaps the rest of the downloads. */
-function reliefInWorker(heights: Float32Array, { nx, nz, step }: TerrainMeta) {
-  return new Promise<Uint8Array>((resolve, reject) => {
+/** Bakes shadows and normals off the main thread, so they overlap the rest of the downloads. */
+function reliefInWorker(heights: Float32Array, detail: Int8Array, { nx, nz, step, detail: scale, detailUnit }: TerrainMeta) {
+  return new Promise<{ relief: Uint8Array; normals: Uint16Array }>((resolve, reject) => {
     const worker = new ReliefWorker()
-    worker.onmessage = (e: MessageEvent<Uint8Array>) => {
+    worker.onmessage = (e: MessageEvent<{ relief: Uint8Array; normals: Uint16Array }>) => {
       resolve(e.data)
       worker.terminate()
     }
@@ -73,7 +79,9 @@ function reliefInWorker(heights: Float32Array, { nx, nz, step }: TerrainMeta) {
       reject(new Error(`relief worker: ${e.message}`))
       worker.terminate()
     }
-    worker.postMessage({ heights, nx, nz, step, sun: SUN_DIR.toArray() })
+    const sun = SUN_DIR.toArray() as [number, number, number]
+    const job: ReliefJob = { heights, nx, nz, step, sun, detail, scale, rise: (detailUnit / 1000) * EXAGGERATION }
+    worker.postMessage(job)
   })
 }
 
@@ -82,10 +90,11 @@ async function fetchHeightfield(): Promise<Heightfield> {
   const heightsP = Promise.all([metaP, fetchOk('/terrain/elevation.bin').then((r) => r.arrayBuffer())]).then(([meta, elevation]) =>
     toHeights(meta, elevation),
   )
-  const [meta, heights, relief, rawMasks, rawCover, rawVerdor, rawQuemas] = await Promise.all([
+  const detailP = fetchOk('/terrain/detail.bin').then((r) => r.arrayBuffer())
+  const [meta, heights, { relief, normals }, rawMasks, rawCover, rawVerdor, rawQuemas] = await Promise.all([
     metaP,
     heightsP,
-    Promise.all([heightsP, metaP]).then(([h, meta]) => reliefInWorker(h, meta)),
+    Promise.all([heightsP, detailP, metaP]).then(([h, detail, meta]) => reliefInWorker(h, new Int8Array(detail), meta)),
     fetchOk('/terrain/masks.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/cover.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/verdor.bin').then((r) => r.arrayBuffer()),
@@ -114,7 +123,7 @@ async function fetchHeightfield(): Promise<Heightfield> {
   shared.uQuemaMask.value = quemaMaskTexture(new Uint8Array(rawQuemas), nx, nz)
   shared.uRelief.value = reliefTexture(relief, nx, nz)
 
-  const hf = { nx, nz, step, heights, cover, masks }
+  const hf = { nx, nz, step, heights, cover, masks, normals, detail: meta.detail }
   return {
     ...hf,
     rivers: meta.rivers.flatMap((r) => r.lines.map((points) => ({ name: r.name, kind: r.kind, points }))),

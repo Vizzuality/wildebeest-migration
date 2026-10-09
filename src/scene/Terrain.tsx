@@ -9,8 +9,8 @@ import { HORIZON } from './Sky'
 /**
  * The mesh keeps one vertex in STRIDE each way. At full resolution most triangles were smaller
  * than a pixel, and the GPU shades every triangle in 2×2 blocks, so the ground shader ran several
- * times per pixel. Normals, Cobertura and lakes come from full-resolution textures instead, so
- * the shading keeps every gully.
+ * times per pixel. Normals (finer still than the grid), Cobertura and lakes come from textures
+ * instead, so the shading keeps every gully.
  */
 const STRIDE = 2
 
@@ -28,7 +28,9 @@ ${GLSL_COMMON}
 ${RIVER_GLSL}
 uniform vec2 uCrater;
 uniform vec2 uCraterLake;
-uniform sampler2D uSurface;
+uniform sampler2D uNormal;
+uniform float uDetail;
+uniform sampler2D uLake;
 uniform sampler2D uCover;
 varying vec3 vWorld;
 
@@ -47,15 +49,15 @@ float canopy(vec2 xz, float tree, float fw) {
 void main() {
   vec2 xz = vWorld.xz;
   vec2 grid = gridUv(xz);
-  vec4 surface = texture2D(uSurface, grid);
+  vec2 sideways = texture2D(uNormal, ((xz - uMapMin) / uMapStep * uDetail + 0.5) / vec2(textureSize(uNormal, 0))).xy;
+  vec3 N = normalize(vec3(sideways.x, sqrt(max(0.0, 1.0 - dot(sideways, sideways))), sideways.y));
   vec4 cover = texture2D(uCover, grid);
-  vec3 N = normalize(surface.xyz);
   float tree = cover.x;
   float shrub = cover.y;
   float wet = cover.z;
   float bare = cover.w;
   float grass = max(0.0, 1.0 - tree - shrub - wet - bare);
-  float lake = surface.w;
+  float lake = texture2D(uLake, grid).r;
   float fw = length(fwidth(xz));
 
   float n2 = tnoise(xz * 0.35 + 3.0);
@@ -179,25 +181,20 @@ function buildGeometry({ nx, nz, step, heights }: Heightfield) {
   }
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
-  geo.setIndex(new THREE.BufferAttribute(gridIndex(nx, nz, 1), 1))
-  geo.computeVertexNormals()
-  const normals = geo.getAttribute('normal').array as Float32Array
-  geo.deleteAttribute('normal')
   geo.setIndex(new THREE.BufferAttribute(gridIndex(nx, nz, STRIDE), 1))
   geo.computeBoundingSphere()
-  return { geo, normals }
+  return geo
 }
 
-/** Normal and lake share per grid vertex, half float so lighting does not band. */
-function surfaceTexture({ nx, nz, masks }: Heightfield, normals: Float32Array) {
-  const data = new Uint16Array(nx * nz * 4)
-  for (let i = 0; i < nx * nz; i++) {
-    data[i * 4] = THREE.DataUtils.toHalfFloat(normals[i * 3])
-    data[i * 4 + 1] = THREE.DataUtils.toHalfFloat(normals[i * 3 + 1])
-    data[i * 4 + 2] = THREE.DataUtils.toHalfFloat(normals[i * 3 + 2])
-    data[i * 4 + 3] = THREE.DataUtils.toHalfFloat(masks[i * 2 + 1])
-  }
-  return linear(new THREE.DataTexture(data, nx, nz, THREE.RGBAFormat, THREE.HalfFloatType))
+/** Half float so lighting does not band on the plains, where normals barely tilt. */
+function normalTexture({ nx, nz, normals, detail }: Heightfield) {
+  return linear(new THREE.DataTexture(normals, (nx - 1) * detail + 1, (nz - 1) * detail + 1, THREE.RGFormat, THREE.HalfFloatType))
+}
+
+function lakeTexture({ nx, nz, masks }: Heightfield) {
+  const tex = new THREE.DataTexture(Uint8Array.from({ length: nx * nz }, (_, i) => Math.round(masks[i * 2 + 1] * 255)), nx, nz, THREE.RedFormat)
+  tex.unpackAlignment = 1
+  return linear(tex)
 }
 
 function coverTexture({ nx, nz, cover }: Heightfield) {
@@ -213,7 +210,7 @@ function linear(tex: THREE.DataTexture) {
 
 export function Terrain() {
   const hf = useHeightfield()
-  const { geo: geometry, normals } = useMemo(() => buildGeometry(hf), [hf])
+  const geometry = useMemo(() => buildGeometry(hf), [hf])
   const material = useMemo(
     () =>
       new THREE.ShaderMaterial({
@@ -224,11 +221,13 @@ export function Terrain() {
           ...riverUniforms,
           uCrater: { value: new THREE.Vector2(...CRATER) },
           uCraterLake: { value: new THREE.Vector2(...CRATER_LAKE) },
-          uSurface: { value: surfaceTexture(hf, normals) },
+          uNormal: { value: normalTexture(hf) },
+          uDetail: { value: hf.detail },
+          uLake: { value: lakeTexture(hf) },
           uCover: { value: coverTexture(hf) },
         },
       }),
-    [hf, normals],
+    [hf],
   )
   return (
     <>
