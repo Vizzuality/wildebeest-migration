@@ -1,5 +1,5 @@
 import { useFrame } from '@react-three/fiber'
-import { BlendFunction, Effect, EffectAttribute } from 'postprocessing'
+import { BlendFunction, Effect, EffectAttribute, ShaderPass } from 'postprocessing'
 import { useMemo } from 'react'
 import * as THREE from 'three'
 import { MAP, PLACES, project } from '../geo'
@@ -107,7 +107,23 @@ function shorelineTexture() {
   return tex
 }
 
-const fragment = /* glsl */ `
+/**
+ * The calima is soft, so it is marched at half the resolution each way (a quarter of the pixels)
+ * and brought back up guided by depth, so relief still cuts it cleanly.
+ */
+const SCALE = 0.5
+
+const marchVertex = /* glsl */ `
+varying vec2 vUv;
+void main() {
+  vUv = position.xy * 0.5 + 0.5;
+  gl_Position = vec4(position.xy, 1.0, 1.0);
+}
+`
+
+const march = /* glsl */ `
+uniform sampler2D uDepth;
+varying vec2 vUv;
 uniform mat4 uProjInv;
 uniform mat4 uCamWorld;
 uniform vec3 uCamPos;
@@ -156,7 +172,13 @@ float density(vec3 p) {
   return edge * 0.5 * body * (0.35 + 1.3 * puff);
 }
 
-void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+// Each low-res texel marches along the ray of the top-left full-res pixel it covers, so the
+// upsampling below knows exactly which depth it was marched to.
+void main() {
+  ivec2 full = textureSize(uDepth, 0);
+  ivec2 at = min(ivec2(gl_FragCoord.xy) * 2, full - 1);
+  float depth = texelFetch(uDepth, at, 0).r;
+  vec2 uv = (vec2(at) + 0.5) / vec2(full);
   vec4 view = uProjInv * vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
   view /= view.w;
   vec3 world = (uCamWorld * view).xyz;
@@ -165,7 +187,8 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   bool sky = depth >= 1.0;
   float dist = sky ? 4000.0 : distance(world, ro);
 
-  vec3 col = inputColor.rgb;
+  float trans = 1.0;
+  vec3 light = vec3(0.0);
 
   // Clip the ray to the slab where the edge calima lives.
   float t0 = 0.0;
@@ -187,8 +210,6 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
     // Forward scattering towards the sun (Henyey–Greenstein, g = 0.5).
     float mu = dot(rd, uSunDir);
     float phase = 0.75 / pow(1.25 - mu, 1.5);
-    float trans = 1.0;
-    vec3 light = vec3(0.0);
     for (int i = 0; i < ${STEPS}; i++) {
       vec3 p = ro + rd * t;
       float sigma = density(p);
@@ -203,10 +224,50 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
       }
       t += dt;
     }
-    col = col * trans + light;
   }
 
-  outputColor = vec4(col, inputColor.a);
+  gl_FragColor = vec4(light, trans);
+}
+`
+
+const composite = /* glsl */ `
+uniform sampler2D uFog;
+uniform float uNear;
+uniform float uFar;
+
+float viewDepth(float d) {
+  return uNear * uFar / (uFar - d * (uFar - uNear));
+}
+
+// Joint bilateral upsampling: the four nearest low-res texels, weighted bilinearly and by how
+// close the depth each was marched to is to this pixel's own.
+void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+  ivec2 low = textureSize(uFog, 0);
+  ivec2 full = textureSize(depthBuffer, 0);
+  vec2 f = uv * vec2(low) - 0.5;
+  ivec2 base = ivec2(floor(f));
+  vec2 t = fract(f);
+  float here = viewDepth(depth);
+  vec4 sum = vec4(0.0);
+  float total = 0.0;
+  vec4 nearest = vec4(0.0, 0.0, 0.0, 1.0);
+  float best = 1e9;
+  for (int k = 0; k < 4; k++) {
+    ivec2 o = ivec2(k & 1, k >> 1);
+    ivec2 texel = clamp(base + o, ivec2(0), low - 1);
+    vec4 fog = texelFetch(uFog, texel, 0);
+    float there = viewDepth(texelFetch(depthBuffer, min(texel * 2, full - 1), 0).r);
+    float gap = abs(there - here) / here;
+    float w = (o.x == 1 ? t.x : 1.0 - t.x) * (o.y == 1 ? t.y : 1.0 - t.y) * exp(-gap * 40.0);
+    sum += fog * w;
+    total += w;
+    if (gap < best) {
+      best = gap;
+      nearest = fog;
+    }
+  }
+  vec4 fog = total > 1e-4 ? sum / total : nearest;
+  outputColor = vec4(inputColor.rgb * fog.a + fog.rgb, inputColor.a);
 }
 `
 
@@ -227,36 +288,78 @@ function noiseTexture(size = 32) {
 const srgb = (hex: string) => new THREE.Color(hex).convertSRGBToLinear()
 
 class BrumaEffect extends Effect {
+  private readonly march: THREE.ShaderMaterial
+  private readonly target: THREE.WebGLRenderTarget
+  private readonly pass: ShaderPass
+
   constructor() {
-    super('Bruma', fragment, {
+    const target = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, type: THREE.HalfFloatType })
+    super('Bruma', composite, {
       attributes: EffectAttribute.DEPTH,
       blendFunction: BlendFunction.NORMAL,
       uniforms: new Map<string, THREE.Uniform>([
-        ['uProjInv', new THREE.Uniform(new THREE.Matrix4())],
-        ['uCamWorld', new THREE.Uniform(new THREE.Matrix4())],
-        ['uCamPos', new THREE.Uniform(new THREE.Vector3())],
-        ['uMapMin', new THREE.Uniform(new THREE.Vector2(MAP.minX, MAP.minZ))],
-        ['uMapMax', new THREE.Uniform(new THREE.Vector2(MAP.maxX, MAP.maxZ))],
-        ['uClock', new THREE.Uniform(0)],
-        ['uSunDir', new THREE.Uniform(SUN_DIR)],
-        ['uHaze', new THREE.Uniform(srgb('#e6cdaa'))],
-        ['uSun', new THREE.Uniform(srgb('#ffd9a8'))],
-        ['uNoise', new THREE.Uniform(noiseTexture())],
-        ['uShore', new THREE.Uniform(shorelineTexture())],
-        ['uShoreMin', new THREE.Uniform(FIELD_MIN)],
-        ['uShoreSize', new THREE.Uniform(FIELD_SIZE)],
+        ['uFog', new THREE.Uniform(target.texture)],
+        ['uNear', new THREE.Uniform(0.5)],
+        ['uFar', new THREE.Uniform(3000)],
       ]),
     })
+    this.target = target
+    this.march = new THREE.ShaderMaterial({
+      vertexShader: marchVertex,
+      fragmentShader: march,
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        uDepth: { value: null },
+        uProjInv: { value: new THREE.Matrix4() },
+        uCamWorld: { value: new THREE.Matrix4() },
+        uCamPos: { value: new THREE.Vector3() },
+        uMapMin: { value: new THREE.Vector2(MAP.minX, MAP.minZ) },
+        uMapMax: { value: new THREE.Vector2(MAP.maxX, MAP.maxZ) },
+        uClock: { value: 0 },
+        uSunDir: { value: SUN_DIR },
+        uHaze: { value: srgb('#e6cdaa') },
+        uSun: { value: srgb('#ffd9a8') },
+        uNoise: { value: noiseTexture() },
+        uShore: { value: shorelineTexture() },
+        uShoreMin: { value: FIELD_MIN },
+        uShoreSize: { value: FIELD_SIZE },
+      },
+    })
+    this.pass = new ShaderPass(this.march, 'none')
+  }
+
+  follow(camera: THREE.PerspectiveCamera, clock: number) {
+    const u = this.march.uniforms
+    u.uProjInv.value.copy(camera.projectionMatrixInverse)
+    u.uCamWorld.value.copy(camera.matrixWorld)
+    u.uCamPos.value.setFromMatrixPosition(camera.matrixWorld)
+    u.uClock.value = clock
+    this.uniforms.get('uNear')!.value = camera.near
+    this.uniforms.get('uFar')!.value = camera.far
+  }
+
+  setDepthTexture(depthTexture: THREE.Texture) {
+    this.march.uniforms.uDepth.value = depthTexture
+  }
+
+  update(renderer: THREE.WebGLRenderer) {
+    this.pass.render(renderer, null, this.target)
+  }
+
+  setSize(width: number, height: number) {
+    this.target.setSize(Math.ceil(width * SCALE), Math.ceil(height * SCALE))
+  }
+
+  dispose() {
+    super.dispose()
+    this.target.dispose()
+    this.march.dispose()
   }
 }
 
 export function Bruma() {
   const effect = useMemo(() => new BrumaEffect(), [])
-  useFrame(({ camera }) => {
-    effect.uniforms.get('uProjInv')!.value.copy(camera.projectionMatrixInverse)
-    effect.uniforms.get('uCamWorld')!.value.copy(camera.matrixWorld)
-    effect.uniforms.get('uCamPos')!.value.setFromMatrixPosition(camera.matrixWorld)
-    effect.uniforms.get('uClock')!.value = shared.uClock.value
-  })
+  useFrame(({ camera }) => effect.follow(camera as THREE.PerspectiveCamera, shared.uClock.value))
   return <primitive object={effect} dispose={null} />
 }
