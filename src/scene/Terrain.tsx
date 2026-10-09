@@ -68,11 +68,11 @@ void main() {
 
   // Hierba swings hardest with the rain: straw in the dry season, fresh green in the rains.
   vec3 straw = mix(srgb(vec3(0.78, 0.65, 0.42)), srgb(vec3(0.66, 0.53, 0.33)), 0.4 + 0.25 * n2);
-  vec3 fresh = mix(srgb(vec3(0.48, 0.54, 0.28)), srgb(vec3(0.38, 0.47, 0.21)), 0.4 + 0.25 * n2);
+  vec3 fresh = mix(srgb(vec3(0.41, 0.54, 0.36)), srgb(vec3(0.32, 0.47, 0.27)), 0.4 + 0.25 * n2);
   vec3 grassCol = mix(straw, fresh, g) * (0.96 + 0.05 * n3);
   // Matorral only half follows it: grey-brown Commiphora thorn at worst, dull olive at best.
-  vec3 shrubCol = mix(srgb(vec3(0.50, 0.43, 0.31)), srgb(vec3(0.36, 0.41, 0.21)), g * 0.7) * (0.92 + 0.1 * n3);
-  vec3 wetCol = mix(srgb(vec3(0.36, 0.42, 0.20)), srgb(vec3(0.22, 0.40, 0.17)), 0.4 + 0.6 * g);
+  vec3 shrubCol = mix(srgb(vec3(0.50, 0.43, 0.31)), srgb(vec3(0.31, 0.41, 0.27)), g * 0.7) * (0.92 + 0.1 * n3);
+  vec3 wetCol = mix(srgb(vec3(0.31, 0.42, 0.26)), srgb(vec3(0.19, 0.40, 0.22)), 0.4 + 0.6 * g);
   vec3 bareCol = srgb(vec3(0.72, 0.66, 0.56));
   float under = max(1.0 - tree, 1e-3);
   vec3 floorCol = (grassCol * grass + shrubCol * shrub + wetCol * wet + bareCol * bare) / under;
@@ -89,13 +89,13 @@ void main() {
     vec3 burnt = mix(srgb(vec3(0.10, 0.09, 0.08)), srgb(vec3(0.36, 0.33, 0.29)), smoothstep(0.1, 1.2, age));
     float fresh = 0.85 * (1.0 - smoothstep(0.6, 3.5, age)) * (1.0 - g);
     floorCol = mix(floorCol, burnt, scar * fresh);
-    floorCol = mix(floorCol, srgb(vec3(0.30, 0.48, 0.16)), scar * g * 0.4 * (1.0 - smoothstep(4.0, 8.0, age)));
+    floorCol = mix(floorCol, srgb(vec3(0.26, 0.48, 0.21)), scar * g * 0.4 * (1.0 - smoothstep(4.0, 8.0, age)));
   }
 
   // Dense canopy (galería, highland forest) stays evergreen; open acacia yellows a little when dry.
   float dense = smoothstep(0.35, 0.8, tree);
-  vec3 acacia = mix(srgb(vec3(0.44, 0.42, 0.22)), srgb(vec3(0.26, 0.34, 0.13)), 0.35 + 0.65 * g);
-  vec3 forest = srgb(vec3(0.13, 0.24, 0.10));
+  vec3 acacia = mix(srgb(vec3(0.44, 0.42, 0.22)), srgb(vec3(0.22, 0.34, 0.17)), 0.35 + 0.65 * g);
+  vec3 forest = srgb(vec3(0.11, 0.24, 0.13));
   vec3 treeCol = mix(acacia, forest, dense) * (0.8 + 0.3 * (0.5 + 0.5 * tnoise(xz * 11.0 + 5.0)));
 
   // Crowns, plus the shadow each one throws away from the sun.
