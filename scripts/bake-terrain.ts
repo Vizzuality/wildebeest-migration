@@ -16,6 +16,10 @@ import { PNG } from 'pngjs'
 import { KM_PER_DEG, LON0, MAP, project, unproject } from '../src/geo.ts'
 
 const STEP = 0.3
+/** Detail cells per grid cell each way: the z11 tiles hold ~75 m, finer than the 300 m grid. */
+const DETAIL = 2
+/** Detail is stored as metres off the grid's own surface, in these steps (m). */
+const DETAIL_UNIT = 0.5
 const ZOOM = 11
 const TILE = 256
 const CACHE = '.cache/terrain'
@@ -58,6 +62,8 @@ const WORLDCOVER_TILES = ['S03E033', 'S06E033']
 const WORLDCOVER_LEVEL = 1
 /** Channels of cover.bin. Grassland, cropland and anything unlisted count as hierba. */
 const COVER: Record<number, number> = { 10: 0, 20: 1, 90: 2, 95: 2, 50: 3, 60: 3 }
+/** crops.bin: the share of Cultivo, which cover.bin leaves inside hierba. */
+const CROPS: Record<number, number> = { 40: 0 }
 const WATER = 80
 
 const PC = 'https://planetarycomputer.microsoft.com/api'
@@ -179,13 +185,48 @@ function resample(sample: (lon: number, lat: number) => number) {
 }
 
 /**
- * Cobertura per cell: share of árbol, matorral, humedal and suelo desnudo among the
- * WorldCover pixels whose centre falls in the cell (open water left out). Hierba is the rest.
+ * What the grid misses: elevation at DETAIL× the resolution, minus the grid's bilinear surface
+ * there, in DETAIL_UNIT steps. The client adds it back only to shade, so the mesh stays light.
  */
-async function loadCover() {
+function resampleDetail(sample: (lon: number, lat: number) => number, coarse: (ix: number, iz: number) => number) {
+  const dnx = (nx - 1) * DETAIL + 1
+  const dnz = (nz - 1) * DETAIL + 1
+  const out = new Int8Array(dnx * dnz)
+  const taps = 2
+  const step = STEP / DETAIL
+  for (let jz = 0; jz < dnz; jz++) {
+    for (let jx = 0; jx < dnx; jx++) {
+      let sum = 0
+      for (let a = 0; a < taps; a++) {
+        for (let b = 0; b < taps; b++) {
+          const x = MAP.minX + (jx + (a + 0.5) / taps - 0.5) * step
+          const z = MAP.minZ + (jz + (b + 0.5) / taps - 0.5) * step
+          sum += sample(...unproject(x, z))
+        }
+      }
+      const fx = jx / DETAIL
+      const fz = jz / DETAIL
+      const ix = Math.min(nx - 2, Math.floor(fx))
+      const iz = Math.min(nz - 2, Math.floor(fz))
+      const tx = fx - ix
+      const tz = fz - iz
+      const base =
+        (coarse(ix, iz) * (1 - tx) + coarse(ix + 1, iz) * tx) * (1 - tz) + (coarse(ix, iz + 1) * (1 - tx) + coarse(ix + 1, iz + 1) * tx) * tz
+      out[jz * dnx + jx] = Math.max(-127, Math.min(127, Math.round((sum / (taps * taps) - base) / DETAIL_UNIT)))
+    }
+  }
+  return out
+}
+
+/**
+ * Per cell, the share of each channel's WorldCover classes among the pixels whose centre falls
+ * in the cell (open water left out). For the Cobertura, hierba is whatever is left.
+ */
+async function loadShares(classes: Record<number, number>, channels: number) {
   const [west, north] = unproject(MAP.minX - STEP, MAP.minZ - STEP)
   const [east, south] = unproject(MAP.maxX + STEP, MAP.maxZ + STEP)
-  const counts = new Uint16Array(nx * nz * 5)
+  const stride = channels + 1
+  const counts = new Uint16Array(nx * nz * stride)
   for (const tile of WORLDCOVER_TILES) {
     const tiff = await fromUrl(WORLDCOVER(tile))
     const full = await tiff.getImage(0)
@@ -212,9 +253,9 @@ async function loadCover() {
           if (ix < 0 || ix >= nx) continue
           const cls = band[r * w + c]
           if (cls === WATER || cls === 0) continue
-          const i = (iz * nx + ix) * 5
-          counts[i + 4]++
-          const ch = COVER[cls]
+          const i = (iz * nx + ix) * stride
+          counts[i + channels]++
+          const ch = classes[cls]
           if (ch !== undefined) counts[i + ch]++
         }
       }
@@ -222,13 +263,13 @@ async function loadCover() {
     }
     console.log()
   }
-  const cover = new Uint8Array(nx * nz * 4)
+  const shares = new Uint8Array(nx * nz * channels)
   for (let i = 0; i < nx * nz; i++) {
-    const total = counts[i * 5 + 4]
+    const total = counts[i * stride + channels]
     if (!total) continue
-    for (let ch = 0; ch < 4; ch++) cover[i * 4 + ch] = Math.round((counts[i * 5 + ch] / total) * 255)
+    for (let ch = 0; ch < channels; ch++) shares[i * channels + ch] = Math.round((counts[i * stride + ch] / total) * 255)
   }
-  return Buffer.from(cover.buffer)
+  return Buffer.from(shares.buffer)
 }
 
 async function pcToken() {
@@ -540,7 +581,8 @@ const rivers = RIVERS.map((r) => {
 const dist = riverDistance(rivers.flatMap((r) => r.lines))
 const verdor = await cached(`verdor-${YEARS.join('-')}-${STEP}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, loadVerdor)
 const quemas = await cached(`quemas-${YEARS.join('-')}-${BURN_YEARS}-${STEP}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, loadQuemas)
-const cover = await cached(`worldcover-${WORLDCOVER_LEVEL}-${STEP}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, loadCover)
+const cover = await cached(`worldcover-${WORLDCOVER_LEVEL}-${STEP}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, () => loadShares(COVER, 4))
+const crops = await cached(`worldcover-crops-${WORLDCOVER_LEVEL}-${STEP}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, () => loadShares(CROPS, 1))
 
 // Elevation in decimetres so 1 m steps never show up as terraces on the plains.
 const dm = new Uint16Array(nx * nz)
@@ -552,14 +594,19 @@ for (let i = 0; i < nx * nz; i++) {
   masks[i * 2 + 1] = lake[i] * 255
 }
 
+console.log(`detail at ${STEP / DETAIL} km`)
+const detail = resampleDetail(sample, (ix, iz) => dm[iz * nx + ix] / 10)
+
 await writeFile(`${OUT}/elevation.bin`, dm)
+await writeFile(`${OUT}/detail.bin`, detail)
 await writeFile(`${OUT}/masks.bin`, masks)
 await writeFile(`${OUT}/cover.bin`, cover)
+await writeFile(`${OUT}/crops.bin`, crops)
 await writeFile(`${OUT}/verdor.bin`, verdor)
 await writeFile(`${OUT}/quemas.bin`, quemas)
 await writeFile(
   `${OUT}/terrain.json`,
-  JSON.stringify({ nx, nz, step: STEP, minX: MAP.minX, minZ: MAP.minZ, base: BASE, riverMax: RIVER_MAX, rivers }),
+  JSON.stringify({ nx, nz, step: STEP, detail: DETAIL, detailUnit: DETAIL_UNIT, minX: MAP.minX, minZ: MAP.minZ, base: BASE, riverMax: RIVER_MAX, rivers }),
 )
 
 let lo = Infinity
@@ -568,11 +615,15 @@ for (const e of elev) {
   lo = Math.min(lo, e)
   hi = Math.max(hi, e)
 }
+let clipped = 0
+for (const d of detail) if (Math.abs(d) === 127) clipped++
+console.log(`detail: ${((clipped / detail.length) * 100).toFixed(2)}% clipped at ±${127 * DETAIL_UNIT} m`)
 const lakeCells = lake.reduce((s, v) => s + v, 0)
 console.log(`elevation ${lo.toFixed(0)}–${hi.toFixed(0)} m, Cota base ${BASE} m, lake ${((lakeCells / lake.length) * 100).toFixed(1)}% of the Mapa`)
 const share = [0, 0, 0, 0]
 for (let i = 0; i < cover.length; i++) share[i % 4] += cover[i] / 255 / (nx * nz)
 console.log(`cobertura: árbol ${(share[0] * 100).toFixed(1)}%, matorral ${(share[1] * 100).toFixed(1)}%, humedal ${(share[2] * 100).toFixed(1)}%, desnudo ${(share[3] * 100).toFixed(1)}%`)
+console.log(`cultivo: ${((crops.reduce((s, v) => s + v, 0) / 255 / (nx * nz)) * 100).toFixed(1)}% of the Mapa`)
 const burnt = quemas.reduce((n, v) => n + (v ? 1 : 0), 0)
 console.log(`quemas: ${((burnt / (nx * nz)) * 100).toFixed(1)}% of the Mapa burns most years`)
 for (const r of rivers) console.log(`  ${r.name}: ${r.lines.length} line(s), ${r.lines.reduce((s, l) => s + l.length, 0)} points`)

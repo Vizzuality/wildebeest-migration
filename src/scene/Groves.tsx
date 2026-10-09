@@ -141,7 +141,7 @@ void main() {
   vec3 N = normalize(vNormal);
   // Foliage scatters light: wrap the diffuse so the shaded side is not flat black.
   N = normalize(mix(N, vec3(0.0, 1.0, 0.0), 0.35 * vCrown));
-  vec3 lit = sunlight(col, N, cloudShadow(vWorld.xz));
+  vec3 lit = sunlight(col, N, sunShadow(vWorld.xz), skyOpen(vWorld.xz));
 
   gl_FragColor = vec4(lit, 1.0);
   #include <tonemapping_fragment>
@@ -152,9 +152,9 @@ void main() {
 const srgb = (r: number, g: number, b: number) => new THREE.Vector3(r ** 2.2, g ** 2.2, b ** 2.2)
 
 const LOOK: Record<Kind, { dry: THREE.Vector3; green: THREE.Vector3; seasonal: number }> = {
-  acacia: { dry: srgb(0.47, 0.44, 0.24), green: srgb(0.29, 0.37, 0.15), seasonal: 0.6 },
-  round: { dry: srgb(0.15, 0.27, 0.11), green: srgb(0.15, 0.27, 0.11), seasonal: 0 },
-  shrub: { dry: srgb(0.46, 0.40, 0.31), green: srgb(0.33, 0.39, 0.19), seasonal: 0.8 },
+  acacia: { dry: srgb(0.47, 0.44, 0.24), green: srgb(0.25, 0.37, 0.20), seasonal: 0.6 },
+  round: { dry: srgb(0.13, 0.27, 0.14), green: srgb(0.13, 0.27, 0.14), seasonal: 0 },
+  shrub: { dry: srgb(0.46, 0.40, 0.31), green: srgb(0.28, 0.39, 0.25), seasonal: 0.8 },
 }
 
 /** Expected Bosquetes per cell where the Cobertura is entirely that kind. */

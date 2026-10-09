@@ -9,8 +9,8 @@ import { HORIZON } from './Sky'
 /**
  * The mesh keeps one vertex in STRIDE each way. At full resolution most triangles were smaller
  * than a pixel, and the GPU shades every triangle in 2×2 blocks, so the ground shader ran several
- * times per pixel. Normals, Cobertura and lakes come from full-resolution textures instead, so
- * the shading keeps every gully.
+ * times per pixel. Normals (finer still than the grid), Cobertura, Cultivo and lakes come from textures
+ * instead, so the shading keeps every gully.
  */
 const STRIDE = 2
 
@@ -28,7 +28,9 @@ ${GLSL_COMMON}
 ${RIVER_GLSL}
 uniform vec2 uCrater;
 uniform vec2 uCraterLake;
-uniform sampler2D uSurface;
+uniform sampler2D uNormal;
+uniform float uDetail;
+uniform sampler2D uGround;
 uniform sampler2D uCover;
 varying vec3 vWorld;
 
@@ -47,15 +49,18 @@ float canopy(vec2 xz, float tree, float fw) {
 void main() {
   vec2 xz = vWorld.xz;
   vec2 grid = gridUv(xz);
-  vec4 surface = texture2D(uSurface, grid);
+  vec2 sideways = texture2D(uNormal, ((xz - uMapMin) / uMapStep * uDetail + 0.5) / vec2(textureSize(uNormal, 0))).xy;
+  vec3 N = normalize(vec3(sideways.x, sqrt(max(0.0, 1.0 - dot(sideways, sideways))), sideways.y));
   vec4 cover = texture2D(uCover, grid);
-  vec3 N = normalize(surface.xyz);
+  vec2 ground = texture2D(uGround, grid).rg;
   float tree = cover.x;
   float shrub = cover.y;
   float wet = cover.z;
   float bare = cover.w;
   float grass = max(0.0, 1.0 - tree - shrub - wet - bare);
-  float lake = surface.w;
+  float crop = min(ground.y, grass);
+  grass -= crop;
+  float lake = ground.x;
   float fw = length(fwidth(xz));
 
   float n2 = tnoise(xz * 0.35 + 3.0);
@@ -65,16 +70,28 @@ void main() {
   float g = greenOf(verdor(xz, order));
 
   // Hierba swings hardest with the rain: straw in the dry season, fresh green in the rains.
-  vec3 straw = mix(srgb(vec3(0.78, 0.65, 0.42)), srgb(vec3(0.66, 0.53, 0.33)), 0.4 + 0.25 * n2);
-  vec3 fresh = mix(srgb(vec3(0.48, 0.54, 0.28)), srgb(vec3(0.38, 0.47, 0.21)), 0.4 + 0.25 * n2);
+  vec3 straw = mix(srgb(vec3(0.78, 0.62, 0.50)), srgb(vec3(0.66, 0.52, 0.41)), 0.4 + 0.25 * n2);
+  vec3 fresh = mix(srgb(vec3(0.41, 0.54, 0.36)), srgb(vec3(0.32, 0.47, 0.27)), 0.4 + 0.25 * n2);
   vec3 grassCol = mix(straw, fresh, g) * (0.96 + 0.05 * n3);
   // Matorral only half follows it: grey-brown Commiphora thorn at worst, dull olive at best.
-  vec3 shrubCol = mix(srgb(vec3(0.50, 0.43, 0.31)), srgb(vec3(0.36, 0.41, 0.21)), g * 0.7) * (0.92 + 0.1 * n3);
-  vec3 wetCol = mix(srgb(vec3(0.36, 0.42, 0.20)), srgb(vec3(0.22, 0.40, 0.17)), 0.4 + 0.6 * g);
+  vec3 shrubCol = mix(srgb(vec3(0.50, 0.43, 0.31)), srgb(vec3(0.31, 0.41, 0.27)), g * 0.7) * (0.92 + 0.1 * n3);
+  vec3 wetCol = mix(srgb(vec3(0.31, 0.42, 0.26)), srgb(vec3(0.19, 0.40, 0.22)), 0.4 + 0.6 * g);
   vec3 bareCol = srgb(vec3(0.72, 0.66, 0.56));
+
+  // Cultivo: a patchwork of plots a few hundred metres across, each tilled red soil, stubble or,
+  // as the rains come, green crop. Once plots shrink below a pixel it settles on their average.
+  vec2 plotUv = mat2(0.94, -0.34, 0.34, 0.94) * xz / 0.45;
+  vec2 plotId = floor(vec2(plotUv.x, plotUv.y + hash12(vec2(floor(plotUv.x), 7.0))));
+  float pick = hash12(plotId + 13.0);
+  float sown = g * 0.75;
+  vec3 soil = srgb(vec3(0.60, 0.40, 0.29));
+  vec3 plot = pick < sown ? fresh : pick < sown + (1.0 - sown) * 0.55 ? soil : straw;
+  vec3 cropAvg = fresh * sown + (soil * 0.55 + straw * 0.45) * (1.0 - sown);
+  vec3 cropCol = mix(cropAvg, plot, 1.0 - smoothstep(0.08, 0.2, fw)) * (0.95 + 0.05 * n3);
+
   float under = max(1.0 - tree, 1e-3);
-  vec3 floorCol = (grassCol * grass + shrubCol * shrub + wetCol * wet + bareCol * bare) / under;
-  if (grass + shrub + wet + bare < 1e-3) floorCol = grassCol;
+  vec3 floorCol = (grassCol * grass + cropCol * crop + shrubCol * shrub + wetCol * wet + bareCol * bare) / under;
+  if (grass + crop + shrub + wet + bare < 1e-3) floorCol = grassCol;
 
   // Quemas: black scar, greying to ash, then fresh shoots greener than the grass around.
   // Bend the 300 m cells of the burn record so scars get the ragged outline of a real fire.
@@ -87,13 +104,13 @@ void main() {
     vec3 burnt = mix(srgb(vec3(0.10, 0.09, 0.08)), srgb(vec3(0.36, 0.33, 0.29)), smoothstep(0.1, 1.2, age));
     float fresh = 0.85 * (1.0 - smoothstep(0.6, 3.5, age)) * (1.0 - g);
     floorCol = mix(floorCol, burnt, scar * fresh);
-    floorCol = mix(floorCol, srgb(vec3(0.30, 0.48, 0.16)), scar * g * 0.4 * (1.0 - smoothstep(4.0, 8.0, age)));
+    floorCol = mix(floorCol, srgb(vec3(0.26, 0.48, 0.21)), scar * g * 0.4 * (1.0 - smoothstep(4.0, 8.0, age)));
   }
 
   // Dense canopy (galería, highland forest) stays evergreen; open acacia yellows a little when dry.
   float dense = smoothstep(0.35, 0.8, tree);
-  vec3 acacia = mix(srgb(vec3(0.44, 0.42, 0.22)), srgb(vec3(0.26, 0.34, 0.13)), 0.35 + 0.65 * g);
-  vec3 forest = srgb(vec3(0.13, 0.24, 0.10));
+  vec3 acacia = mix(srgb(vec3(0.44, 0.42, 0.22)), srgb(vec3(0.22, 0.34, 0.17)), 0.35 + 0.65 * g);
+  vec3 forest = srgb(vec3(0.11, 0.24, 0.13));
   vec3 treeCol = mix(acacia, forest, dense) * (0.8 + 0.3 * (0.5 + 0.5 * tnoise(xz * 11.0 + 5.0)));
 
   // Crowns, plus the shadow each one throws away from the sun.
@@ -132,7 +149,9 @@ void main() {
   vec3 water = mix(srgb(vec3(0.07, 0.20, 0.27)), srgb(vec3(0.16, 0.36, 0.42)), shimmer * 0.6);
   col = mix(col, water, smoothstep(0.4, 0.9, lake));
 
-  vec3 lit = sunlight(col, N, cloudShadow(xz));
+  float open = skyOpen(xz);
+  // Valleys and the foot of escarpments also lose some bounced sun, not just sky.
+  vec3 lit = sunlight(col, N, sunShadow(xz), open) * mix(0.8, 1.0, open);
   lit += water * lake * pow(max(dot(reflect(-uSunDir, N), vec3(0.0, 1.0, 0.0)), 0.0), 8.0) * 0.08;
   float glint = pow(max(dot(reflect(-uSunDir, vec3(0.0, 1.0, 0.0)), normalize(cameraPosition - vWorld)), 0.0), 60.0);
   lit += srgb(vec3(1.0, 0.9, 0.75)) * glint * river.water * weight * 0.6;
@@ -177,25 +196,26 @@ function buildGeometry({ nx, nz, step, heights }: Heightfield) {
   }
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
-  geo.setIndex(new THREE.BufferAttribute(gridIndex(nx, nz, 1), 1))
-  geo.computeVertexNormals()
-  const normals = geo.getAttribute('normal').array as Float32Array
-  geo.deleteAttribute('normal')
   geo.setIndex(new THREE.BufferAttribute(gridIndex(nx, nz, STRIDE), 1))
   geo.computeBoundingSphere()
-  return { geo, normals }
+  return geo
 }
 
-/** Normal and lake share per grid vertex, half float so lighting does not band. */
-function surfaceTexture({ nx, nz, masks }: Heightfield, normals: Float32Array) {
-  const data = new Uint16Array(nx * nz * 4)
+/** Half float so lighting does not band on the plains, where normals barely tilt. */
+function normalTexture({ nx, nz, normals, detail }: Heightfield) {
+  return linear(new THREE.DataTexture(normals, (nx - 1) * detail + 1, (nz - 1) * detail + 1, THREE.RGFormat, THREE.HalfFloatType))
+}
+
+/** Per grid vertex: lake (R) and Cultivo (G). */
+function groundTexture({ nx, nz, masks, crops }: Heightfield) {
+  const data = new Uint8Array(nx * nz * 2)
   for (let i = 0; i < nx * nz; i++) {
-    data[i * 4] = THREE.DataUtils.toHalfFloat(normals[i * 3])
-    data[i * 4 + 1] = THREE.DataUtils.toHalfFloat(normals[i * 3 + 1])
-    data[i * 4 + 2] = THREE.DataUtils.toHalfFloat(normals[i * 3 + 2])
-    data[i * 4 + 3] = THREE.DataUtils.toHalfFloat(masks[i * 2 + 1])
+    data[i * 2] = Math.round(masks[i * 2 + 1] * 255)
+    data[i * 2 + 1] = Math.round(crops[i] * 255)
   }
-  return linear(new THREE.DataTexture(data, nx, nz, THREE.RGBAFormat, THREE.HalfFloatType))
+  const tex = new THREE.DataTexture(data, nx, nz, THREE.RGFormat)
+  tex.unpackAlignment = 2
+  return linear(tex)
 }
 
 function coverTexture({ nx, nz, cover }: Heightfield) {
@@ -211,7 +231,7 @@ function linear(tex: THREE.DataTexture) {
 
 export function Terrain() {
   const hf = useHeightfield()
-  const { geo: geometry, normals } = useMemo(() => buildGeometry(hf), [hf])
+  const geometry = useMemo(() => buildGeometry(hf), [hf])
   const material = useMemo(
     () =>
       new THREE.ShaderMaterial({
@@ -222,11 +242,13 @@ export function Terrain() {
           ...riverUniforms,
           uCrater: { value: new THREE.Vector2(...CRATER) },
           uCraterLake: { value: new THREE.Vector2(...CRATER_LAKE) },
-          uSurface: { value: surfaceTexture(hf, normals) },
+          uNormal: { value: normalTexture(hf) },
+          uDetail: { value: hf.detail },
+          uGround: { value: groundTexture(hf) },
           uCover: { value: coverTexture(hf) },
         },
       }),
-    [hf, normals],
+    [hf],
   )
   return (
     <>

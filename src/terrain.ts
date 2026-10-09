@@ -1,7 +1,9 @@
 import { use } from 'react'
 import * as THREE from 'three'
 import { MAP } from './geo'
-import { shared } from './shaders/common'
+import type { ReliefJob } from './relief.worker.ts'
+import ReliefWorker from './relief.worker.ts?worker'
+import { SUN_DIR, shared } from './shaders/common'
 
 // Seeded PRNG so the landscape is identical on every load.
 export function mulberry32(seed: number) {
@@ -30,6 +32,8 @@ interface TerrainMeta {
   nx: number
   nz: number
   step: number
+  detail: number
+  detailUnit: number
   minX: number
   minZ: number
   base: number
@@ -44,8 +48,13 @@ export interface Heightfield {
   heights: Float32Array
   /** Per vertex Cobertura (0–1): árbol, matorral, humedal, suelo desnudo. Hierba is the rest. */
   cover: Float32Array
+  /** Per vertex share of Cultivo (0–1), which `cover` counts inside hierba. */
+  crops: Float32Array
   /** Per vertex: distance to nearest river (km), lake (0/1). */
   masks: Float32Array
+  /** Ground normals at `detail`× the grid's resolution: half-float x, z per cell. */
+  normals: Uint16Array
+  detail: number
   rivers: RiverLine[]
   heightAt: (x: number, z: number) => number
 }
@@ -56,25 +65,52 @@ async function fetchOk(url: string) {
   return res
 }
 
+function toHeights(meta: TerrainMeta, elevation: ArrayBuffer) {
+  return Float32Array.from(new Uint16Array(elevation), (v) => ((v / 10 - meta.base) / 1000) * EXAGGERATION)
+}
+
+/** Bakes shadows and normals off the main thread, so they overlap the rest of the downloads. */
+function reliefInWorker(heights: Float32Array, detail: Int8Array, { nx, nz, step, detail: scale, detailUnit }: TerrainMeta) {
+  return new Promise<{ relief: Uint8Array; normals: Uint16Array }>((resolve, reject) => {
+    const worker = new ReliefWorker()
+    worker.onmessage = (e: MessageEvent<{ relief: Uint8Array; normals: Uint16Array }>) => {
+      resolve(e.data)
+      worker.terminate()
+    }
+    worker.onerror = (e) => {
+      reject(new Error(`relief worker: ${e.message}`))
+      worker.terminate()
+    }
+    const sun = SUN_DIR.toArray() as [number, number, number]
+    const job: ReliefJob = { heights, nx, nz, step, sun, detail, scale, rise: (detailUnit / 1000) * EXAGGERATION }
+    worker.postMessage(job)
+  })
+}
+
 async function fetchHeightfield(): Promise<Heightfield> {
-  const [meta, elevation, rawMasks, rawCover, rawVerdor, rawQuemas] = await Promise.all([
-    fetchOk('/terrain/terrain.json').then((r) => r.json() as Promise<TerrainMeta>),
-    fetchOk('/terrain/elevation.bin').then((r) => r.arrayBuffer()),
+  const metaP = fetchOk('/terrain/terrain.json').then((r) => r.json() as Promise<TerrainMeta>)
+  const heightsP = Promise.all([metaP, fetchOk('/terrain/elevation.bin').then((r) => r.arrayBuffer())]).then(([meta, elevation]) =>
+    toHeights(meta, elevation),
+  )
+  const detailP = fetchOk('/terrain/detail.bin').then((r) => r.arrayBuffer())
+  const [meta, heights, { relief, normals }, rawMasks, rawCover, rawCrops, rawVerdor, rawQuemas] = await Promise.all([
+    metaP,
+    heightsP,
+    Promise.all([heightsP, detailP, metaP]).then(([h, detail, meta]) => reliefInWorker(h, new Int8Array(detail), meta)),
     fetchOk('/terrain/masks.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/cover.bin').then((r) => r.arrayBuffer()),
+    fetchOk('/terrain/crops.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/verdor.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/quemas.bin').then((r) => r.arrayBuffer()),
   ])
   if (meta.minX !== MAP.minX || meta.minZ !== MAP.minZ) throw new Error('terrain bake does not match MAP, run pnpm bake:terrain')
 
   const { nx, nz, step } = meta
-  const dm = new Uint16Array(elevation)
   const bytes = new Uint8Array(rawMasks)
-  const heights = new Float32Array(nx * nz)
   const masks = new Float32Array(nx * nz * 2)
   const cover = Float32Array.from(new Uint8Array(rawCover), (v) => v / 255)
+  const crops = Float32Array.from(new Uint8Array(rawCrops), (v) => v / 255)
   for (let i = 0; i < nx * nz; i++) {
-    heights[i] = ((dm[i] / 10 - meta.base) / 1000) * EXAGGERATION
     masks[i * 2] = (bytes[i * 2] / 240) * meta.riverMax
     masks[i * 2 + 1] = bytes[i * 2 + 1] / 255
   }
@@ -89,8 +125,9 @@ async function fetchHeightfield(): Promise<Heightfield> {
   shared.uVerdor.value = verdorTextures(new Uint8Array(rawVerdor), nx, nz)
   shared.uQuemas.value = quemasTexture(new Uint8Array(rawQuemas), nx, nz)
   shared.uQuemaMask.value = quemaMaskTexture(new Uint8Array(rawQuemas), nx, nz)
+  shared.uRelief.value = reliefTexture(relief, nx, nz)
 
-  const hf = { nx, nz, step, heights, cover, masks }
+  const hf = { nx, nz, step, heights, cover, crops, masks, normals, detail: meta.detail }
   return {
     ...hf,
     rivers: meta.rivers.flatMap((r) => r.lines.map((points) => ({ name: r.name, kind: r.kind, points }))),
@@ -109,6 +146,16 @@ function verdorTextures(verdor: Uint8Array, nx: number, nz: number) {
     tex.needsUpdate = true
     return tex
   })
+}
+
+/** Per cell: sun past the Relieve (R) and open sky (G), from bakeRelief. */
+function reliefTexture(relief: Uint8Array, nx: number, nz: number) {
+  const tex = new THREE.DataTexture(relief, nx, nz, THREE.RGFormat)
+  tex.minFilter = THREE.LinearFilter
+  tex.magFilter = THREE.LinearFilter
+  tex.unpackAlignment = 2
+  tex.needsUpdate = true
+  return tex
 }
 
 /** Usual month of each cell's Quema (1–12, 0 = none). Nearest filtering: months don't blend. */

@@ -318,7 +318,7 @@ class BrumaEffect extends Effect {
         uMapMax: { value: new THREE.Vector2(MAP.maxX, MAP.maxZ) },
         uClock: { value: 0 },
         uSunDir: { value: SUN_DIR },
-        uHaze: { value: srgb('#e6cdaa') },
+        uHaze: { value: srgb('#e6c7aa') },
         uSun: { value: srgb('#ffd9a8') },
         uNoise: { value: noiseTexture() },
         uShore: { value: shorelineTexture() },

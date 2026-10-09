@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import * as THREE from 'three'
 
-export const HORIZON = '#e9c79c'
+export const HORIZON = '#e9bf9c'
 
 export function Sky() {
   const material = useMemo(
@@ -20,7 +20,7 @@ export function Sky() {
           varying vec3 vDir;
           void main() {
             float h = vDir.y;
-            vec3 horizon = vec3(0.91, 0.78, 0.61);
+            vec3 horizon = vec3(0.91, 0.75, 0.61);
             vec3 mid = vec3(0.55, 0.62, 0.72);
             vec3 zenith = vec3(0.16, 0.24, 0.40);
             vec3 col = mix(horizon, mid, smoothstep(0.0, 0.25, h));
