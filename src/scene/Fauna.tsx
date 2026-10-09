@@ -518,6 +518,11 @@ function agolpar(recorrido: [number, number][], samplesPerMonth: number, rivers:
     const prev = (i - 1 + n) % n
     clock[i] = clock[prev] + Math.max(0, rate[prev]) / samplesPerMonth
   }
+  // Holds and catch-ups only cancel out to within a sample, so the clock is stretched to close
+  // the year exactly; otherwise the Manada jumps where it comes back round to CLOCK_FROM.
+  const end = (origin + n - 1) % n
+  const year = clock[end] + Math.max(0, rate[end]) / samplesPerMonth - CLOCK_FROM
+  for (let i = 0; i < n; i++) clock[i] = CLOCK_FROM + ((clock[i] - CLOCK_FROM) * 12) / year
   const at = (time: number) => {
     const f = (((time * samplesPerMonth) % n) + n) % n
     const i = Math.floor(f)
