@@ -34,7 +34,7 @@ const DROP_SIZE = 1.65
 const SIZE_REF_KM = 13
 const SIZE_POWER = 0.3
 /** The field at the liquid's edge, and the field over which it deepens from there. */
-const EDGE = 0.5
+const EDGE = 0.9
 const EDGE_FROM = 0.15
 const EDGE_FULL = 1.4
 /** The field over which the Apiñamiento goes from none to full, and its glow. */
@@ -45,11 +45,21 @@ const CROWD_GLOW = 0.12
 const FLOW_KM_PER_S = 1.2
 /**
  * The liquid runs out over green, level grass and draws back off slopes and bare ground, so its
- * edge follows the land it crosses: the field is scaled from LAND_POOR on bare or steep ground
- * to LAND_RICH on full flush.
+ * edge follows the land it crosses: the field is raised to 1 / land, land running from LAND_POOR
+ * on bare or steep ground to LAND_RICH on full flush. A power rather than a scale only moves the
+ * outskirts: the middle (field 1 and up) stays above the edge, so no stretch of the Manada
+ * vanishes over poor ground.
  */
 const LAND_POOR = 0.6
 const LAND_RICH = 1.2
+/**
+ * The ground under the liquid is warped by slow noise before the body is traced, so its rim runs
+ * in lobes and inlets that drift and change. WARP_KM pooled, eased to WARP_MOVING_KM on the move
+ * so the stream is not broken; WARP_SCALE sets how broad the lobes are (smaller is broader).
+ */
+const WARP_KM = 4
+const WARP_MOVING_KM = 1.2
+const WARP_SCALE = 0.35
 /**
  * The Manada fills a stretch of the Recorrido, from its head CHAIN_HEAD months ahead of the
  * calendar to its tail CHAIN_TAIL behind, traced through CHAIN_POINTS points as one tube. On the
@@ -277,7 +287,12 @@ float tube(vec2 p, vec2 a, vec2 b, float ra, float rb, out vec2 away) {
 }
 
 void main() {
-  vec2 p = vWorld;
+  float warp = mix(${WARP_KM.toFixed(2)}, ${WARP_MOVING_KM.toFixed(2)}, uMotion);
+  vec2 lobes = vWorld * ${WARP_SCALE.toFixed(2)};
+  vec2 p = vWorld + warp * vec2(
+    tnoise(lobes + vec2(uClock * 0.03, 3.1)) * 0.7 + tnoise(lobes * 2.3 - vec2(5.7, uClock * 0.05)) * 0.3,
+    tnoise(lobes + vec2(11.3, -uClock * 0.03)) * 0.7 + tnoise(lobes * 2.3 + vec2(uClock * 0.05, 8.9)) * 0.3
+  );
   float field = 0.0;
   vec2 grad = vec2(0.0);
   // Where this point sits relative to the drops around it, so the texture travels with them.
@@ -326,12 +341,13 @@ void main() {
       field += thread(p, uSpine[i], uSpine[i + 1], min(uSpine[i].z, uSpine[i + 1].z) * 0.55, grad);
     }
   }
-  float lush = greenOf(verdor(p, 0.5));
-  vec2 slope = vec2(heightAt(p + vec2(1.5, 0.0)) - heightAt(p - vec2(1.5, 0.0)), heightAt(p + vec2(0.0, 1.5)) - heightAt(p - vec2(0.0, 1.5))) / 3.0;
+  float lush = greenOf(verdor(vWorld, 0.5));
+  vec2 slope = vec2(heightAt(vWorld + vec2(1.5, 0.0)) - heightAt(vWorld - vec2(1.5, 0.0)), heightAt(vWorld + vec2(0.0, 1.5)) - heightAt(vWorld - vec2(0.0, 1.5))) / 3.0;
   float steep = smoothstep(0.04, 0.2, length(slope));
   float land = mix(${LAND_POOR.toFixed(2)}, ${LAND_RICH.toFixed(2)}, lush * (1.0 - steep));
-  field *= land;
-  grad *= land;
+  float tamed = pow(max(field, 1e-6), 1.0 / land);
+  grad *= tamed / max(field, 1e-6) / land;
+  field = tamed;
 
   // A clean rim, only antialiased; inside it the liquid runs deeper towards the middle.
   float aa = fwidth(field);
@@ -365,13 +381,13 @@ void main() {
   vec3 albedo = mix(vec3(0.2, 0.16, 0.12), vec3(0.38, 0.2, 0.08), crowd);
   albedo = mix(albedo, vec3(0.13, 0.1, 0.08), uMotion * 0.6);
   albedo *= 1.0 + grain * 0.18 + streak * 0.35 * uMotion;
-  vec3 lit = sunlight(srgb(albedo), normal, cloudShadow(p));
+  vec3 lit = sunlight(srgb(albedo), normal, cloudShadow(vWorld));
   // Packed tight it glows a little on top of the light, so the crowd reads even in shadow.
   lit += srgb(vec3(0.62, 0.3, 0.08)) * crowd * crowd * ${CROWD_GLOW.toFixed(2)} * body;
   // Wet: the sun glints off it.
-  vec3 view = normalize(cameraPosition - vec3(p.x, vHeight, p.y));
+  vec3 view = normalize(cameraPosition - vec3(vWorld.x, vHeight, vWorld.y));
   float glint = pow(max(dot(normal, normalize(uSunDir + view)), 0.0), 60.0);
-  lit += srgb(vec3(1.0, 0.85, 0.65)) * glint * 0.35 * body * (1.0 - cloudShadow(p));
+  lit += srgb(vec3(1.0, 0.85, 0.65)) * glint * 0.35 * body * (1.0 - cloudShadow(vWorld));
   gl_FragColor = vec4(lit, alpha);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
