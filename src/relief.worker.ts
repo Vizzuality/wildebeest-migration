@@ -1,4 +1,4 @@
-import { bakeNormals, bakeRelief } from './relief'
+import { bakeNormals, bakeRelief, fineHeights } from './relief'
 
 export interface ReliefJob {
   heights: Float32Array
@@ -13,7 +13,9 @@ export interface ReliefJob {
 
 self.onmessage = (e: MessageEvent<ReliefJob>) => {
   const { heights, nx, nz, step, sun, detail, scale, rise } = e.data
-  const relief = bakeRelief(heights, nx, nz, step, sun)
-  const normals = bakeNormals(heights, nx, nz, step, detail, scale, rise)
+  // Both bake from the fine ground, so shadows are as sharp as the shading beside them.
+  const { fine, dnx, dnz } = fineHeights(heights, nx, nz, detail, scale, rise)
+  const relief = bakeRelief(fine, dnx, dnz, step / scale, sun, scale)
+  const normals = bakeNormals(fine, dnx, dnz, step / scale)
   self.postMessage({ relief, normals }, { transfer: [relief.buffer, normals.buffer] })
 }

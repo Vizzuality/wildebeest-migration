@@ -7,6 +7,7 @@ import { Bruma } from './Bruma'
 import { CameraRig } from './CameraRig'
 import { Border, Labels } from './Overlays'
 import { Rivers } from './Rivers'
+import { Sharpen } from './Sharpen'
 import { Sky } from './Sky'
 import { Terrain } from './Terrain'
 import { Groves } from './Groves'
@@ -43,6 +44,7 @@ export function Scene() {
       <Labels />
       <CameraRig />
       <EffectComposer multisampling={dpr >= 1.5 ? 0 : 4}>
+        <Sharpen />
         <Bruma />
         <Bloom intensity={0.55} luminanceThreshold={0.82} mipmapBlur />
         <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />

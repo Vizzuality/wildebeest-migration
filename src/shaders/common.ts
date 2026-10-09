@@ -115,6 +115,12 @@ float rainN(float month) {
 float northness(float z) { return smoothstep(80.0, -110.0, z); }
 float rainAt(float z, float month) { return mix(rainS(month), rainN(month), northness(z)); }
 vec2 gridUv(vec2 xz) { return ((xz - uMapMin) / uMapStep + 0.5) / uGrid; }
+// For textures baked finer than the grid, on the same corners.
+vec2 detailUv(vec2 xz, ivec2 texels) {
+  vec2 size = vec2(texels);
+  return ((xz - uMapMin) / uMapStep * (size - 1.0) / (uGrid - 1.0) + 0.5) / size;
+}
+vec2 reliefUv(vec2 xz) { return detailUv(xz, textureSize(uRelief, 0)); }
 
 float verdorIn(vec2 uv, int month) {
   int m = wrap12(month);
@@ -184,11 +190,11 @@ float cloudShadow(vec2 xz) {
 
 // How much of the sky a spot sees (0–1): low in valley floors and under escarpments. Even a
 // deep valley keeps ~70% of its sky at this exaggeration, so that is stretched to the full range.
-float skyOpen(vec2 xz) { return smoothstep(0.72, 0.98, texture2D(uRelief, gridUv(xz)).g); }
+float skyOpen(vec2 xz) { return smoothstep(0.72, 0.98, texture2D(uRelief, reliefUv(xz)).g); }
 
 // Shadow from the Relieve and the clouds together (0 = full sun).
 float sunShadow(vec2 xz) {
-  return 1.0 - texture2D(uRelief, gridUv(xz)).r * (1.0 - cloudShadow(xz));
+  return 1.0 - texture2D(uRelief, reliefUv(xz)).r * (1.0 - cloudShadow(xz));
 }
 
 // Warm low sun and cool sky fill, shared so ground and Bosquetes light the same.

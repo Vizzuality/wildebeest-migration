@@ -50,6 +50,9 @@ export interface Heightfield {
   cover: Float32Array
   /** Per vertex share of Cultivo (0–1), which `cover` counts inside hierba. */
   crops: Float32Array
+  /** `cover` and `crops` at `detail`× the grid's resolution, as bytes, for the ground to paint from. */
+  coverDetail: Uint8Array
+  cropsDetail: Uint8Array
   /** Per vertex: distance to nearest river (km), lake (0/1). */
   masks: Float32Array
   /** Ground normals at `detail`× the grid's resolution: half-float x, z per cell. */
@@ -93,7 +96,7 @@ async function fetchHeightfield(): Promise<Heightfield> {
     toHeights(meta, elevation),
   )
   const detailP = fetchOk('/terrain/detail.bin').then((r) => r.arrayBuffer())
-  const [meta, heights, { relief, normals }, rawMasks, rawCover, rawCrops, rawVerdor, rawQuemas] = await Promise.all([
+  const [meta, heights, { relief, normals }, rawMasks, rawCover, rawCrops, rawVerdor, rawQuemas, rawCoverDetail, rawCropsDetail] = await Promise.all([
     metaP,
     heightsP,
     Promise.all([heightsP, detailP, metaP]).then(([h, detail, meta]) => reliefInWorker(h, new Int8Array(detail), meta)),
@@ -102,6 +105,8 @@ async function fetchHeightfield(): Promise<Heightfield> {
     fetchOk('/terrain/crops.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/verdor.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/quemas.bin').then((r) => r.arrayBuffer()),
+    fetchOk('/terrain/cover-detail.bin').then((r) => r.arrayBuffer()),
+    fetchOk('/terrain/crops-detail.bin').then((r) => r.arrayBuffer()),
   ])
   if (meta.minX !== MAP.minX || meta.minZ !== MAP.minZ) throw new Error('terrain bake does not match MAP, run pnpm bake:terrain')
 
@@ -125,9 +130,11 @@ async function fetchHeightfield(): Promise<Heightfield> {
   shared.uVerdor.value = verdorTextures(new Uint8Array(rawVerdor), nx, nz)
   shared.uQuemas.value = quemasTexture(new Uint8Array(rawQuemas), nx, nz)
   shared.uQuemaMask.value = quemaMaskTexture(new Uint8Array(rawQuemas), nx, nz)
-  shared.uRelief.value = reliefTexture(relief, nx, nz)
+  shared.uRelief.value = reliefTexture(relief, (nx - 1) * meta.detail + 1, (nz - 1) * meta.detail + 1)
 
-  const hf = { nx, nz, step, heights, cover, crops, masks, normals, detail: meta.detail }
+  const coverDetail = new Uint8Array(rawCoverDetail)
+  const cropsDetail = new Uint8Array(rawCropsDetail)
+  const hf = { nx, nz, step, heights, cover, crops, coverDetail, cropsDetail, masks, normals, detail: meta.detail }
   return {
     ...hf,
     rivers: meta.rivers.flatMap((r) => r.lines.map((points) => ({ name: r.name, kind: r.kind, points }))),
@@ -135,27 +142,33 @@ async function fetchHeightfield(): Promise<Heightfield> {
   }
 }
 
+/**
+ * Mipmapped so distant ground averages its texels instead of skipping them, which shimmers as
+ * the camera moves; anisotropic so the view at a slant stays sharp instead of smearing.
+ */
+export function mipmapped(tex: THREE.DataTexture) {
+  tex.minFilter = THREE.LinearMipmapLinearFilter
+  tex.magFilter = THREE.LinearFilter
+  tex.generateMipmaps = true
+  tex.anisotropy = 8
+  tex.needsUpdate = true
+  return tex
+}
+
 /** Twelve months of Verdor per cell, split across three RGBA textures (four months each). */
 function verdorTextures(verdor: Uint8Array, nx: number, nz: number) {
   return [0, 1, 2].map((k) => {
     const data = new Uint8Array(nx * nz * 4)
     for (let i = 0; i < nx * nz; i++) for (let c = 0; c < 4; c++) data[i * 4 + c] = verdor[i * 12 + k * 4 + c]
-    const tex = new THREE.DataTexture(data, nx, nz, THREE.RGBAFormat)
-    tex.minFilter = THREE.LinearFilter
-    tex.magFilter = THREE.LinearFilter
-    tex.needsUpdate = true
-    return tex
+    return mipmapped(new THREE.DataTexture(data, nx, nz, THREE.RGBAFormat))
   })
 }
 
-/** Per cell: sun past the Relieve (R) and open sky (G), from bakeRelief. */
+/** Per detail cell: sun past the Relieve (R) and open sky (G), from bakeRelief. */
 function reliefTexture(relief: Uint8Array, nx: number, nz: number) {
   const tex = new THREE.DataTexture(relief, nx, nz, THREE.RGFormat)
-  tex.minFilter = THREE.LinearFilter
-  tex.magFilter = THREE.LinearFilter
   tex.unpackAlignment = 2
-  tex.needsUpdate = true
-  return tex
+  return mipmapped(tex)
 }
 
 /** Usual month of each cell's Quema (1–12, 0 = none). Nearest filtering: months don't blend. */

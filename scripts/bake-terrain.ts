@@ -55,7 +55,7 @@ const RIVERS: { name: string; kind: 'main' | 'tributary'; osm: string[] }[] = [
 ]
 
 // WorldCover tiles are 3°×3°, named by their south-west corner. Overview 1 is ~20 m/px:
-// ~225 samples per 300 m cell, plenty for fractions, at a quarter of the download.
+// ~56 samples per 150 m detail cell, plenty for fractions, at a quarter of the download.
 const WORLDCOVER = (tile: string) =>
   `https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_${tile}_Map.tif`
 const WORLDCOVER_TILES = ['S03E033', 'S06E033']
@@ -220,13 +220,17 @@ function resampleDetail(sample: (lon: number, lat: number) => number, coarse: (i
 
 /**
  * Per cell, the share of each channel's WorldCover classes among the pixels whose centre falls
- * in the cell (open water left out). For the Cobertura, hierba is whatever is left.
+ * in the cell (open water left out). For the Cobertura, hierba is whatever is left. `scale`
+ * splits each grid cell into scale × scale, on the same corners, as the detail does.
  */
-async function loadShares(classes: Record<number, number>, channels: number) {
-  const [west, north] = unproject(MAP.minX - STEP, MAP.minZ - STEP)
-  const [east, south] = unproject(MAP.maxX + STEP, MAP.maxZ + STEP)
+async function loadShares(classes: Record<number, number>, channels: number, scale = 1) {
+  const gnx = (nx - 1) * scale + 1
+  const gnz = (nz - 1) * scale + 1
+  const step = STEP / scale
+  const [west, north] = unproject(MAP.minX - step, MAP.minZ - step)
+  const [east, south] = unproject(MAP.maxX + step, MAP.maxZ + step)
   const stride = channels + 1
-  const counts = new Uint16Array(nx * nz * stride)
+  const counts = new Uint16Array(gnx * gnz * stride)
   for (const tile of WORLDCOVER_TILES) {
     const tiff = await fromUrl(WORLDCOVER(tile))
     const full = await tiff.getImage(0)
@@ -246,14 +250,14 @@ async function loadShares(classes: Record<number, number>, channels: number) {
       const w = x1 - x0
       for (let r = 0; r < h; r++) {
         const lat = tn - (y + r + 0.5) * res
-        const iz = Math.round((project([LON0, lat])[1] - MAP.minZ) / STEP)
-        if (iz < 0 || iz >= nz) continue
+        const iz = Math.round((project([LON0, lat])[1] - MAP.minZ) / step)
+        if (iz < 0 || iz >= gnz) continue
         for (let c = 0; c < w; c++) {
-          const ix = Math.round(((tw + (x0 + c + 0.5) * res - LON0) * KM_PER_DEG - MAP.minX) / STEP)
-          if (ix < 0 || ix >= nx) continue
+          const ix = Math.round(((tw + (x0 + c + 0.5) * res - LON0) * KM_PER_DEG - MAP.minX) / step)
+          if (ix < 0 || ix >= gnx) continue
           const cls = band[r * w + c]
           if (cls === WATER || cls === 0) continue
-          const i = (iz * nx + ix) * stride
+          const i = (iz * gnx + ix) * stride
           counts[i + channels]++
           const ch = classes[cls]
           if (ch !== undefined) counts[i + ch]++
@@ -263,8 +267,8 @@ async function loadShares(classes: Record<number, number>, channels: number) {
     }
     console.log()
   }
-  const shares = new Uint8Array(nx * nz * channels)
-  for (let i = 0; i < nx * nz; i++) {
+  const shares = new Uint8Array(gnx * gnz * channels)
+  for (let i = 0; i < gnx * gnz; i++) {
     const total = counts[i * stride + channels]
     if (!total) continue
     for (let ch = 0; ch < channels; ch++) shares[i * channels + ch] = Math.round((counts[i * stride + ch] / total) * 255)
@@ -583,6 +587,13 @@ const verdor = await cached(`verdor-${YEARS.join('-')}-${STEP}-${MAP.minX}-${MAP
 const quemas = await cached(`quemas-${YEARS.join('-')}-${BURN_YEARS}-${STEP}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, loadQuemas)
 const cover = await cached(`worldcover-${WORLDCOVER_LEVEL}-${STEP}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, () => loadShares(COVER, 4))
 const crops = await cached(`worldcover-crops-${WORLDCOVER_LEVEL}-${STEP}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, () => loadShares(CROPS, 1))
+// The ground paints from these finer copies; Bosquetes and the fauna bake still read the grid's.
+const coverDetail = await cached(`worldcover-${WORLDCOVER_LEVEL}-${STEP / DETAIL}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, () =>
+  loadShares(COVER, 4, DETAIL),
+)
+const cropsDetail = await cached(`worldcover-crops-${WORLDCOVER_LEVEL}-${STEP / DETAIL}-${MAP.minX}-${MAP.minZ}-${MAP.maxX}-${MAP.maxZ}.bin`, () =>
+  loadShares(CROPS, 1, DETAIL),
+)
 
 // Elevation in decimetres so 1 m steps never show up as terraces on the plains.
 const dm = new Uint16Array(nx * nz)
@@ -602,6 +613,8 @@ await writeFile(`${OUT}/detail.bin`, detail)
 await writeFile(`${OUT}/masks.bin`, masks)
 await writeFile(`${OUT}/cover.bin`, cover)
 await writeFile(`${OUT}/crops.bin`, crops)
+await writeFile(`${OUT}/cover-detail.bin`, coverDetail)
+await writeFile(`${OUT}/crops-detail.bin`, cropsDetail)
 await writeFile(`${OUT}/verdor.bin`, verdor)
 await writeFile(`${OUT}/quemas.bin`, quemas)
 await writeFile(
