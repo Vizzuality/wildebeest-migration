@@ -17,7 +17,7 @@ import { Partos, type OnMancha } from './Partos'
 // tail drains after it. At a stay the ones in front stop while the rest keep arriving, so the
 // stream pools. Every drop's place comes straight from the Recorrido, so nothing can jump.
 
-const DROPS = 40
+const DROPS = 1
 /** How far ahead of or behind the calendar the drops run (months, one sigma). */
 const LAG_SIGMA = 0.17
 /** The Presencia averages five years of collars, so the pool is drawn this much tighter. */
@@ -25,21 +25,42 @@ const SPREAD = 0.45
 /** On the move the stream narrows: the faster, the thinner (km/month). */
 const SQUEEZE_KM_PER_MONTH = 30
 /** Drop radius, as a share of the Presencia's size. */
-const DROP_SIZE = 0.48
-/** How much each drop stretches along the way, per km/month of pace. */
-const STRETCH = 0.35
-/** The field over which the liquid's edge fades in. */
+const DROP_SIZE = 1.65
+/**
+ * The Presencia spreads from ~13 km (σ) at the Mara to ~34 km in December, and drawn to scale the
+ * Manada swamps the plains. Its size is tamed towards the Mara's: SIZE_POWER of 1 keeps it to
+ * scale, 0 makes it the Mara's everywhere. Its shape (long, wide, which way) is kept as it is.
+ */
+const SIZE_REF_KM = 13
+const SIZE_POWER = 0.3
+/** The field at the liquid's edge, and the field over which it deepens from there. */
+const EDGE = 0.5
 const EDGE_FROM = 0.15
 const EDGE_FULL = 1.4
 /** The field over which the Apiñamiento goes from none to full, and its glow. */
 const CROWD_FROM = 2
 const CROWD_FULL = 9
 const CROWD_GLOW = 0.12
-/** How far back in time each drop's trail reaches, per segment (months), and how it thins. */
-const TRAIL_MONTHS = 0.06
-const TRAIL_HEAD = 0.55
-const TRAIL_MID = 0.4
-const TRAIL_END = 0.25
+/** How fast the streaks run down the Manada on the move (km a second at full pace). */
+const FLOW_KM_PER_S = 1.2
+/**
+ * The liquid runs out over green, level grass and draws back off slopes and bare ground, so its
+ * edge follows the land it crosses: the field is scaled from LAND_POOR on bare or steep ground
+ * to LAND_RICH on full flush.
+ */
+const LAND_POOR = 0.6
+const LAND_RICH = 1.2
+/**
+ * The Manada fills a stretch of the Recorrido, from its head CHAIN_HEAD months ahead of the
+ * calendar to its tail CHAIN_TAIL behind, traced through CHAIN_POINTS points as one tube. On the
+ * move the stretch is as long as the pace makes it and bends with every turn of the way; standing
+ * still its points fall on one spot and it pools. Each point is as wide as the Presencia across
+ * the way there, times CHAIN_WIDTH, so it narrows where the way funnels to a crossing.
+ */
+const CHAIN_HEAD = 0.12
+const CHAIN_TAIL = 0.45
+const CHAIN_POINTS = 13
+const CHAIN_WIDTH = 3
 /**
  * On the move each drop keeps its own lane beside the way, across it rather than along the
  * map's axes, so a turn does not swap the drops from one side of the stream to the other. The
@@ -56,11 +77,10 @@ const ROUND_MONTHS = 0.15
 /**
  * A real crossing is a single gentle bank a few hundred metres wide, so the Manada funnels into
  * it: within NECK_REACH km of where the way crosses a main river its lanes close in, down to
- * NECK_MIN of their width (and the drops to NECK_DROP of their size) on the river itself.
+ * NECK_MIN of their width on the river itself.
  */
 const NECK_REACH = 30
 const NECK_MIN = 0.12
-const NECK_DROP = 0.55
 /**
  * Each drop takes its own line through the year: it drifts across the stream by up to about
  * WANDER_SIDE of the Presencia's width, and up to about WANDER_LAG months ahead or behind its usual
@@ -70,6 +90,26 @@ const NECK_DROP = 0.55
 const WANDER_SIDE = 0.3
 const WANDER_LAG = 0.05
 const WANDER_WAVES = 4
+/**
+ * Viscosity: the waves are the same for every drop, only shifted by FLOW_PHASE radians per sigma
+ * of the drop's place in the body. Neighbours move almost as one and a slow swell runs through
+ * the Manada from one end to the other, instead of each drop wandering off on its own.
+ */
+const FLOW_PHASE = 1.1
+/**
+ * Each drop is dragged by how far its neighbours have moved lately, less its own move, by up to
+ * VISCOSITY of the difference. "Lately" is measured from where it was over the last few
+ * VISCOUS_MONTHS, the nearer past counting most. Only the motion is shared, so the shape at rest
+ * is the same; on the move drops side by side go along together instead of sliding apart.
+ */
+const VISCOSITY = 0.8
+const VISCOUS_MONTHS = 0.1
+const VISCOUS_LOOKS = [1, 2, 3, 4, 5, 6]
+const VISCOUS_WEIGHTS = (() => {
+  const w = VISCOUS_LOOKS.map((k) => Math.exp(-k / 2))
+  const total = w.reduce((a, b) => a + b, 0)
+  return w.map((v) => v / total)
+})()
 /**
  * A drop never strays further from its point on the Recorrido than the nearest main river, so
  * none ends up across a river the way has not crossed. Close to a river (a corridor, a bank, a
@@ -98,6 +138,12 @@ const SAME_CRUCE = 0.3
 /** Draped grid resolution, and the lift that keeps it off the ground (km). */
 const GRID = 320
 const LIFT = 0.03
+/**
+ * The grid is coarser than the ground and its Bosquetes, so between its vertices a ridge or a
+ * crown can rise above it. Each vertex is drawn this much nearer the camera along its own line of
+ * sight (km): it stays put on screen but wins over anything that close behind it.
+ */
+const PULL = 0.6
 
 interface Wave {
   size: number
@@ -129,7 +175,7 @@ function drops(): Drop[] {
   // Slower waves swing wider, scaled so the sum stays about ±1.
   const norm = Math.sqrt(Array.from({ length: WANDER_WAVES }, (_, k) => 1 / (k + 1) ** 2).reduce((a, b) => a + b, 0) / 2)
   const waves = () => Array.from({ length: WANDER_WAVES }, (_, k) => ({ size: (rnd() + 0.5) / (k + 1) / norm / 1.5, phase: rnd() * Math.PI * 2 }))
-  return Array.from({ length: DROPS }, () => ({
+  const all = Array.from({ length: DROPS }, () => ({
     lag: THREE.MathUtils.clamp(gauss(), -2.3, 2.3) * LAG_SIGMA,
     u: gauss() * 0.8,
     v: gauss() * 0.8,
@@ -137,6 +183,27 @@ function drops(): Drop[] {
     side: waves(),
     late: waves(),
   }))
+  // Centred on the Recorrido and the calendar, so a handful of drops (or one) is not pulled off it.
+  const mean = (key: 'lag' | 'u' | 'v') => all.reduce((sum, drop) => sum + drop[key], 0) / DROPS
+  const [lag, u, v] = [mean('lag'), mean('u'), mean('v')]
+  all.forEach((drop) => Object.assign(drop, { lag: drop.lag - lag, u: drop.u - u, v: drop.v - v }))
+  // Shared waves, each running through the body its own way; a seed of their own keeps every
+  // drop's starting place as it was.
+  const flow = mulberry32(23)
+  const heading = () => {
+    const a = flow() * Math.PI * 2
+    const b = Math.acos(flow() * 2 - 1)
+    return [Math.sin(b) * Math.cos(a), Math.sin(b) * Math.sin(a), Math.cos(b)]
+  }
+  const shared = (base: Wave[]) => base.map((w) => ({ ...w, heading: heading() }))
+  const side = shared(all[0].side)
+  const late = shared(all[0].late)
+  const wobble = { phase: flow() * Math.PI * 2, heading: heading() }
+  return all.map((drop) => {
+    const at = (h: number[]) => FLOW_PHASE * (h[0] * drop.u + h[1] * drop.v + (h[2] * drop.lag) / LAG_SIGMA)
+    const along = (waves: typeof side) => waves.map(({ size, phase, heading }) => ({ size, phase: phase + at(heading) }))
+    return { ...drop, wobble: wobble.phase + at(wobble.heading), side: along(side), late: along(late) }
+  })
 }
 
 const uniforms = {
@@ -146,10 +213,15 @@ const uniforms = {
   uAxes: { value: Array.from({ length: DROPS }, () => new THREE.Vector3(1, 0, 1)) },
   /** Each drop's point on the Recorrido itself (x, z) and radius, in order along the stream. */
   uSpine: { value: Array.from({ length: DROPS }, () => new THREE.Vector3()) },
-  /** Where each drop was a moment ago and a moment before that: its trail along its own lane. */
-  uTrail: { value: Array.from({ length: DROPS }, () => new THREE.Vector4()) },
+  /** Each drop's stretch of the way, head to tail: x, z and half-width (km). */
+  uChain: { value: Array.from({ length: DROPS * CHAIN_POINTS }, () => new THREE.Vector3()) },
   uOrigin: { value: new THREE.Vector2() },
   uSize: { value: 1 },
+  /** How much the Manada is on the move (0 pooled, 1 streaming) and which way. */
+  uMotion: { value: 0 },
+  uHeading: { value: new THREE.Vector2(0, 1) },
+  /** How far the streaks on its surface have run (km). */
+  uFlow: { value: 0 },
 }
 
 const vertex = /* glsl */ `
@@ -157,10 +229,14 @@ ${GLSL_COMMON}
 uniform vec2 uOrigin;
 uniform float uSize;
 varying vec2 vWorld;
+varying float vHeight;
 void main() {
   vec2 xz = uOrigin + uv * uSize;
   vWorld = xz;
-  gl_Position = projectionMatrix * viewMatrix * vec4(xz.x, heightAt(xz) + ${LIFT.toFixed(3)}, xz.y, 1.0);
+  vHeight = heightAt(xz) + ${LIFT.toFixed(3)};
+  vec3 world = vec3(xz.x, vHeight, xz.y);
+  world += normalize(cameraPosition - world) * ${PULL.toFixed(2)};
+  gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
 }
 `
 
@@ -169,8 +245,12 @@ ${GLSL_COMMON}
 uniform vec4 uDrops[${DROPS}];
 uniform vec3 uAxes[${DROPS}];
 uniform vec3 uSpine[${DROPS}];
-uniform vec4 uTrail[${DROPS}];
+uniform vec3 uChain[${DROPS * CHAIN_POINTS}];
+uniform float uMotion;
+uniform vec2 uHeading;
+uniform float uFlow;
 varying vec2 vWorld;
+varying float vHeight;
 
 // A thread of liquid from a to b. At its centre line it always reaches 1, above the surface.
 float thread(vec2 p, vec3 a, vec3 b, float r, inout vec2 grad) {
@@ -185,18 +265,15 @@ float thread(vec2 p, vec3 a, vec3 b, float r, inout vec2 grad) {
   return w;
 }
 
-// A thread that thins from ra at a to rb at b.
-float taper(vec2 p, vec2 a, vec2 b, float ra, float rb, inout vec2 grad) {
+// How far p is from a tube from a to b that thins from ra to rb, in radii squared, and which way
+// that grows.
+float tube(vec2 p, vec2 a, vec2 b, float ra, float rb, out vec2 away) {
   vec2 ab = b - a;
-  float k = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+  float k = clamp(dot(p - a, ab) / max(dot(ab, ab), ra * ra), 0.0, 1.0);
   vec2 d = p - a - ab * k;
-  float d2 = dot(d, d);
-  float r = mix(ra, rb, k);
-  float r2 = r * r;
-  if (d2 > r2 * 6.0) return 0.0;
-  float w = exp(-d2 / r2);
-  grad -= 2.0 * d / r2 * w;
-  return w;
+  float r2 = pow(mix(ra, rb, k), 2.0);
+  away = 2.0 * d / r2;
+  return dot(d, d) / r2;
 }
 
 void main() {
@@ -205,6 +282,7 @@ void main() {
   vec2 grad = vec2(0.0);
   // Where this point sits relative to the drops around it, so the texture travels with them.
   vec2 local = vec2(0.0);
+  float near = 0.0;
   for (int i = 0; i < ${DROPS}; i++) {
     vec2 d = p - uDrops[i].xy;
     vec2 t = uAxes[i].xy;
@@ -214,39 +292,86 @@ void main() {
     float a = dot(d, t);
     float b = dot(d, n);
     float spread = a * a / ra2 + b * b / r2;
+    // Far and wide, so the texture keeps to the drop all down its body.
+    float wl = exp(-spread * 0.05);
+    local += (d + vec2(float(i) * 37.1, float(i) * 17.3)) * wl;
+    near += wl;
     if (spread > 6.0) continue;
-    float w = exp(-spread);
+    // Only pooled: on the move the stretch of the way is the whole body.
+    float w = exp(-spread) * (1.0 - uMotion);
     field += w;
     grad -= 2.0 * (t * a / ra2 + n * b / r2) * w;
-    local += (d + vec2(float(i) * 37.1, float(i) * 17.3)) * w;
   }
-  // Spine along the Recorrido, and behind each drop the trail it leaves down its own lane, thinning
-  // as it stretches: a drop that runs ahead stays joined to the rest the way mud pulls out.
+  // Spine along the Recorrido, and each drop's stretch of the way as one tube round the nearest
+  // of its points, so it bends smoothly with the way instead of beading where the points meet.
   for (int i = 0; i < ${DROPS}; i++) {
-    float r = uDrops[i].z;
-    field += taper(p, uDrops[i].xy, uTrail[i].xy, r * ${TRAIL_HEAD.toFixed(2)}, r * ${TRAIL_MID.toFixed(2)}, grad);
-    field += taper(p, uTrail[i].xy, uTrail[i].zw, r * ${TRAIL_MID.toFixed(2)}, r * ${TRAIL_END.toFixed(2)}, grad);
+    float best = 1e9;
+    vec2 bestAway = vec2(0.0);
+    for (int k = 0; k + 1 < ${CHAIN_POINTS}; k++) {
+      vec3 a = uChain[i * ${CHAIN_POINTS} + k];
+      vec3 b = uChain[i * ${CHAIN_POINTS} + k + 1];
+      vec2 away;
+      float s = tube(p, a.xy, b.xy, a.z, b.z, away);
+      if (s < best) {
+        best = s;
+        bestAway = away;
+      }
+    }
+    if (best < 6.0) {
+      float w = exp(-best);
+      field += w;
+      grad -= bestAway * w;
+    }
     if (i + 1 < ${DROPS}) {
       field += thread(p, uSpine[i], uSpine[i + 1], min(uSpine[i].z, uSpine[i + 1].z) * 0.55, grad);
     }
   }
-  // No hard rim: the liquid fades out to nothing towards its edge.
-  float body = smoothstep(${EDGE_FROM.toFixed(2)}, ${EDGE_FULL.toFixed(2)}, field);
-  float alpha = body * 0.9;
-  if (alpha < 0.005) discard;
-  local /= max(field, 1e-4);
+  float lush = greenOf(verdor(p, 0.5));
+  vec2 slope = vec2(heightAt(p + vec2(1.5, 0.0)) - heightAt(p - vec2(1.5, 0.0)), heightAt(p + vec2(0.0, 1.5)) - heightAt(p - vec2(0.0, 1.5))) / 3.0;
+  float steep = smoothstep(0.04, 0.2, length(slope));
+  float land = mix(${LAND_POOR.toFixed(2)}, ${LAND_RICH.toFixed(2)}, lush * (1.0 - steep));
+  field *= land;
+  grad *= land;
 
-  // The surface bulges a little where the liquid runs deep, so the sun models it.
-  vec3 normal = normalize(vec3(-grad.x * 0.6, 1.0, -grad.y * 0.6));
+  // A clean rim, only antialiased; inside it the liquid runs deeper towards the middle.
+  float aa = fwidth(field);
+  float edge = smoothstep(${EDGE.toFixed(2)} - aa, ${EDGE.toFixed(2)} + aa, field);
+  float body = smoothstep(${EDGE_FROM.toFixed(2)}, ${EDGE_FULL.toFixed(2)}, field);
+  float alpha = edge * 0.9;
+  if (alpha < 0.005) discard;
+  // At a third of the distance, so swirls and streaks stay broad across the body.
+  local *= 0.33 / max(near, 1e-6);
+
+  // On the move streaks run back down the Manada from its head, faster down its middle than at its
+  // edges, as in a river; pooled they slow to a lazy swirl.
+  vec2 across = vec2(-uHeading.y, uHeading.x);
+  vec2 run = vec2(dot(local, uHeading), dot(local, across));
+  float shear = uFlow * (0.4 + 0.6 * body);
+  vec2 streakAt = vec2(run.x * 0.5 + shear, run.y * 2.5);
+  vec2 swirlAt = local * 0.6 + vec2(uClock * 0.05, -uClock * 0.04);
+  float streak = mix(tnoise(swirlAt), tnoise(streakAt), uMotion);
+  float ahead = mix(tnoise(swirlAt + vec2(0.4, 0.0)), tnoise(streakAt + vec2(0.4, 0.0)), uMotion);
+  float aside = mix(tnoise(swirlAt + vec2(0.0, 0.4)), tnoise(streakAt + vec2(0.0, 0.4)), uMotion);
+  vec2 ripple = ((ahead - streak) * mix(vec2(1.0, 0.0), uHeading, uMotion) + (aside - streak) * mix(vec2(0.0, 1.0), across, uMotion)) * body * body;
+
+  // The surface bulges a little where the liquid runs deep, and ripples, so the sun models it.
+  vec3 normal = normalize(vec3(-grad.x * 0.6 - ripple.x * 1.5, 1.0, -grad.y * 0.6 - ripple.y * 1.5));
   // Apiñamiento: the more drops pile up on a point, the more packed the Manada is there.
   float crowd = smoothstep(${CROWD_FROM.toFixed(1)}, ${CROWD_FULL.toFixed(1)}, field);
+  // Pooled it packs warm round its middle; streaming it runs dark and thin.
+  float pooled = (1.0 - uMotion) * smoothstep(0.6, 2.6, field);
+  crowd = max(crowd, pooled);
   float grain = tnoise(local * 3.0) * 0.5 + tnoise(local * 9.0) * 0.3;
   vec3 albedo = mix(vec3(0.2, 0.16, 0.12), vec3(0.38, 0.2, 0.08), crowd);
-  albedo *= 1.0 + grain * 0.18;
-  albedo = mix(vec3(0.42, 0.35, 0.26), albedo, body);
+  albedo = mix(albedo, vec3(0.13, 0.1, 0.08), uMotion * 0.6);
+  albedo *= 1.0 + grain * 0.18 + streak * 0.35 * uMotion;
   vec3 lit = sunlight(srgb(albedo), normal, cloudShadow(p));
   // Packed tight it glows a little on top of the light, so the crowd reads even in shadow.
   lit += srgb(vec3(0.62, 0.3, 0.08)) * crowd * crowd * ${CROWD_GLOW.toFixed(2)} * body;
+  // Wet: the sun glints off it.
+  vec3 view = normalize(cameraPosition - vec3(p.x, vHeight, p.y));
+  float glint = pow(max(dot(normal, normalize(uSunDir + view)), 0.0), 60.0);
+  lit += srgb(vec3(1.0, 0.85, 0.65)) * glint * 0.35 * body * (1.0 - cloudShadow(p));
   gl_FragColor = vec4(lit, alpha);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -508,8 +633,9 @@ function spot(bake: Way, drop: Drop, t: number, clock: number, open = neckAt(bak
   const tx = pace > LANE_FROM ? vx / pace : fx
   const tz = pace > LANE_FROM ? vz / pace : fz
   const squeeze = (SPREAD / (1 + pace / SQUEEZE_KM_PER_MONTH)) * (NECK_MIN + (1 - NECK_MIN) * open)
-  const shrink = NECK_DROP + (1 - NECK_DROP) * open
   const [xx, xz, zz] = formaAt(bake.forma, t)
+  const geo = Math.sqrt(Math.sqrt(Math.max(xx * zz - xz * xz, 1e-6)))
+  const tame = Math.pow(geo / SIZE_REF_KM, SIZE_POWER - 1)
   const u = drop.u + 0.08 * Math.sin(clock * 0.2 + drop.wobble)
   const v = drop.v + 0.08 * Math.cos(clock * 0.17 + drop.wobble * 1.7)
   const lane = THREE.MathUtils.smoothstep(pace, LANE_FROM, LANE_FULL)
@@ -542,7 +668,9 @@ function spot(bake: Way, drop: Drop, t: number, clock: number, open = neckAt(bak
     tz,
     pace,
     open,
-    size: Math.sqrt(Math.sqrt(xx * zz - xz * xz)) * (SPREAD / (1 + pace / SQUEEZE_KM_PER_MONTH)) * shrink * DROP_SIZE,
+    size: geo * tame * (SPREAD / (1 + pace / SQUEEZE_KM_PER_MONTH)) * DROP_SIZE,
+    forma: [xx, xz, zz],
+    half: across * squeeze * tame,
   }
 }
 
@@ -552,34 +680,79 @@ function place(bake: Way, hf: Heightfield, all: Drop[], month: number, clock: nu
   let maxX = -Infinity
   let maxZ = -Infinity
   let biggest = 0
+  let motion = 0
+  let headX = 0
+  let headZ = 0
   const spine: { lag: number; x: number; z: number; r: number }[] = []
-  all.forEach((drop, i) => {
+  const now = all.map((drop) => {
     const lag = lagAt(drop, month)
-    const t = month + lag
-    const { x, z, sx, sz, tx, tz, pace, open, size } = spot(bake, drop, t, clock)
-    const mid = spot(bake, drop, t - TRAIL_MONTHS, clock, open)
-    const end = spot(bake, drop, t - 2 * TRAIL_MONTHS, clock, open)
+    const here = spot(bake, drop, month + lag, clock)
     // The stream tapers towards its head and tail.
     const taper = 1 - 0.45 * Math.min(1, Math.abs(lag) / (2.3 * LAG_SIGMA))
-    const r = Math.max(0.6, size * taper)
-    // Neighbouring drops are about this far apart along the way; stretching each one over
-    // the gap keeps the stream whole instead of breaking it into beads.
-    const along = r + pace * LAG_SIGMA * STRETCH
-    uniforms.uDrops.value[i].set(x, z, r, hf.heightAt(x, z))
-    uniforms.uAxes.value[i].set(tx, tz, along)
+    let thenX = 0
+    let thenZ = 0
+    VISCOUS_LOOKS.forEach((k, n) => {
+      const before = month - (k * VISCOUS_MONTHS) / 2
+      const then = spot(bake, drop, before + lagAt(drop, before), clock)
+      thenX += then.x * VISCOUS_WEIGHTS[n]
+      thenZ += then.z * VISCOUS_WEIGHTS[n]
+    })
+    return { lag, here, r: Math.max(0.6, here.size * taper), moveX: here.x - thenX, moveZ: here.z - thenZ }
+  })
+  all.forEach((drop, i) => {
+    const { lag, here, r } = now[i]
+    const t = month + lag
+    let pullX = 0
+    let pullZ = 0
+    let weight = 0
+    now.forEach((other, j) => {
+      if (j === i) return
+      const reach = r + other.r
+      const w = Math.exp(-((other.here.x - here.x) ** 2 + (other.here.z - here.z) ** 2) / (reach * reach))
+      pullX += (other.moveX - now[i].moveX) * w
+      pullZ += (other.moveZ - now[i].moveZ) * w
+      weight += w
+    })
+    // A drop alone has nothing to drag it; one in the thick of the others goes with them.
+    const dx = (pullX * VISCOSITY) / (weight + 1)
+    const dz = (pullZ * VISCOSITY) / (weight + 1)
+    const { tx, tz, pace, sx, sz, forma } = here
+    const x = here.x + dx
+    const z = here.z + dz
+    // Head to tail; the head comes round and the tail thins out as it drains.
+    const chain = Array.from({ length: CHAIN_POINTS }, (_, k) => {
+      const along = k / (CHAIN_POINTS - 1)
+      const at = spot(bake, drop, t + CHAIN_HEAD - along * (CHAIN_HEAD + CHAIN_TAIL), clock)
+      const shape = Math.max(0.3, Math.sqrt(Math.min(1, along / 0.25))) * (1 - 0.65 * along)
+      return [at.x + dx, at.z + dz, at.half * CHAIN_WIDTH * shape]
+    })
+    // Pooled it takes the Presencia's own shape, long where the herd spreads out along the land.
+    const [xx, xz, zz] = forma
+    const turn = 0.5 * Math.atan2(2 * xz, xx - zz)
+    const mean = (xx + zz) / 2
+    const half = Math.sqrt(((xx - zz) / 2) ** 2 + xz ** 2)
+    const long = Math.sqrt(Math.sqrt((mean + half) / Math.max(mean - half, 1e-6)))
+    let [px, pz] = [Math.cos(turn), Math.sin(turn)]
+    if (px * tx + pz * tz < 0) [px, pz] = [-px, -pz]
+    const lane = THREE.MathUtils.smoothstep(pace, LANE_FROM, LANE_FULL)
+    const along = r * long
+    uniforms.uDrops.value[i].set(x, z, r / long, hf.heightAt(x, z))
+    uniforms.uAxes.value[i].set(px, pz, along)
     spine.push({ lag, x: sx, z: sz, r })
-    uniforms.uTrail.value[i].set(mid.x, mid.z, end.x, end.z)
-    for (const [px, pz] of [
-      [x, z],
-      [end.x, end.z],
-    ]) {
+    chain.forEach(([cx, cz, cr], k) => uniforms.uChain.value[i * CHAIN_POINTS + k].set(cx, cz, cr))
+    for (const [px, pz, pr] of [[x, z, along], ...chain]) {
       minX = Math.min(minX, px)
       minZ = Math.min(minZ, pz)
       maxX = Math.max(maxX, px)
       maxZ = Math.max(maxZ, pz)
+      biggest = Math.max(biggest, pr)
     }
-    biggest = Math.max(biggest, along)
+    motion += lane / DROPS
+    headX += tx
+    headZ += tz
   })
+  uniforms.uMotion.value = motion
+  if (Math.hypot(headX, headZ) > 1e-6) uniforms.uHeading.value.set(headX, headZ).normalize()
   // Drops overtake one another, so the spine is threaded in their order along the stream now.
   spine.sort((a, b) => a.lag - b.lag).forEach((s, k) => uniforms.uSpine.value[k].set(s.x, s.z, s.r))
   // Past ~2.5 radii a drop adds nothing (the shader skips it), so that is all the margin needed.
@@ -662,7 +835,10 @@ export function Fauna() {
   useEffect(() => () => geometry.dispose(), [geometry])
   useEffect(() => () => material.dispose(), [material])
 
-  useFrame(() => place(bake, hf, all, useStore.getState().month, shared.uClock.value))
+  useFrame((_, delta) => {
+    place(bake, hf, all, useStore.getState().month, shared.uClock.value)
+    uniforms.uFlow.value += delta * uniforms.uMotion.value * FLOW_KM_PER_S
+  })
 
   // Well inside one drop, so the point is on the liquid whatever its neighbours do.
   const onMancha = useCallback<OnMancha>(
