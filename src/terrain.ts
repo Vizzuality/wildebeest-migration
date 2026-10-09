@@ -125,7 +125,7 @@ async function fetchHeightfield(): Promise<Heightfield> {
   shared.uVerdor.value = verdorTextures(new Uint8Array(rawVerdor), nx, nz)
   shared.uQuemas.value = quemasTexture(new Uint8Array(rawQuemas), nx, nz)
   shared.uQuemaMask.value = quemaMaskTexture(new Uint8Array(rawQuemas), nx, nz)
-  shared.uRelief.value = reliefTexture(relief, nx, nz)
+  shared.uRelief.value = reliefTexture(relief, (nx - 1) * meta.detail + 1, (nz - 1) * meta.detail + 1)
 
   const hf = { nx, nz, step, heights, cover, crops, masks, normals, detail: meta.detail }
   return {
@@ -148,7 +148,7 @@ function verdorTextures(verdor: Uint8Array, nx: number, nz: number) {
   })
 }
 
-/** Per cell: sun past the Relieve (R) and open sky (G), from bakeRelief. */
+/** Per detail cell: sun past the Relieve (R) and open sky (G), from bakeRelief. */
 function reliefTexture(relief: Uint8Array, nx: number, nz: number) {
   const tex = new THREE.DataTexture(relief, nx, nz, THREE.RGFormat)
   tex.minFilter = THREE.LinearFilter
