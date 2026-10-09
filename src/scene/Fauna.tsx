@@ -378,13 +378,13 @@ void main() {
   float grain = tnoise(local * 3.0) * 0.5 + tnoise(local * 9.0) * 0.3;
   vec3 albedo = mix(vec3(0.2, 0.16, 0.12), vec3(0.38, 0.2, 0.08), crowd);
   albedo *= 1.0 + grain * 0.18;
-  vec3 lit = sunlight(srgb(albedo), normal, cloudShadow(vWorld));
+  vec3 lit = sunlight(srgb(albedo), normal, sunShadow(vWorld));
   // Packed tight it glows a little on top of the light, so the crowd reads even in shadow.
   lit += srgb(vec3(0.62, 0.3, 0.08)) * crowd * crowd * ${CROWD_GLOW.toFixed(2)} * body;
   // Wet: the sun glints off it.
   vec3 view = normalize(cameraPosition - vec3(vWorld.x, vHeight, vWorld.y));
   float glint = pow(max(dot(normal, normalize(uSunDir + view)), 0.0), 60.0);
-  lit += srgb(vec3(1.0, 0.85, 0.65)) * glint * 0.35 * body * (1.0 - cloudShadow(vWorld));
+  lit += srgb(vec3(1.0, 0.85, 0.65)) * glint * 0.35 * body * (1.0 - sunShadow(vWorld));
   gl_FragColor = vec4(lit, alpha);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>

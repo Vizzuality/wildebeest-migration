@@ -5,7 +5,14 @@ import { MAP, RAIN_NORTH, RAIN_SOUTH } from '../geo'
 export const NDVI_DRY = 0.3
 export const NDVI_LUSH = 0.62
 
-export const SUN_DIR = new THREE.Vector3(-0.62, 0.55, 0.56).normalize()
+// Late-afternoon sun from the south-west, low enough that the Relieve throws long shadows.
+const SUN_ELEVATION = THREE.MathUtils.degToRad(20)
+const SUN_AZIMUTH = Math.atan2(0.56, -0.62)
+export const SUN_DIR = new THREE.Vector3(
+  Math.cos(SUN_AZIMUTH) * Math.cos(SUN_ELEVATION),
+  Math.sin(SUN_ELEVATION),
+  Math.sin(SUN_AZIMUTH) * Math.cos(SUN_ELEVATION),
+)
 
 /**
  * Tileable smooth value noise, 32 lattice cells across. Sampled through mipmaps, so detail
@@ -58,6 +65,7 @@ export const shared = {
   uVerdor: { value: [] as THREE.DataTexture[] },
   uQuemas: { value: null as THREE.DataTexture | null },
   uQuemaMask: { value: null as THREE.DataTexture | null },
+  uRelief: { value: null as THREE.DataTexture | null },
 }
 
 export const GLSL_COMMON = /* glsl */ `
@@ -74,6 +82,7 @@ uniform vec2 uGrid;
 uniform sampler2D uVerdor[3];
 uniform sampler2D uQuemas;
 uniform sampler2D uQuemaMask;
+uniform sampler2D uRelief;
 
 vec3 srgb(vec3 c) { return pow(c, vec3(2.2)); }
 
@@ -173,13 +182,24 @@ float cloudShadow(vec2 xz) {
   return cloud * rainy * 0.45;
 }
 
-// Warm low sun and cool sky fill, shared so ground and Bosquetes light the same.
-vec3 sunlight(vec3 albedo, vec3 N, float shadow) {
-  float diff = max(dot(N, uSunDir), 0.0);
-  vec3 sun = srgb(vec3(1.0, 0.86, 0.66)) * 1.55;
-  vec3 sky = mix(srgb(vec3(0.45, 0.42, 0.40)), srgb(vec3(0.55, 0.62, 0.75)), N.y * 0.5 + 0.5) * 0.55;
-  return albedo * (sky + sun * diff * (1.0 - shadow));
+// How much of the sky a spot sees (0–1): low in valley floors and under escarpments. Even a
+// deep valley keeps ~70% of its sky at this exaggeration, so that is stretched to the full range.
+float skyOpen(vec2 xz) { return smoothstep(0.72, 0.98, texture2D(uRelief, gridUv(xz)).g); }
+
+// Shadow from the Relieve and the clouds together (0 = full sun).
+float sunShadow(vec2 xz) {
+  return 1.0 - texture2D(uRelief, gridUv(xz)).r * (1.0 - cloudShadow(xz));
 }
+
+// Warm low sun and cool sky fill, shared so ground and Bosquetes light the same.
+vec3 sunlight(vec3 albedo, vec3 N, float shadow, float open) {
+  float diff = max(dot(N, uSunDir), 0.0);
+  // Scaled so flat ground gets the same sun at any SUN_ELEVATION: lowering it only shapes slopes.
+  vec3 sun = srgb(vec3(1.0, 0.86, 0.66)) * (0.85 / uSunDir.y);
+  vec3 sky = mix(srgb(vec3(0.45, 0.42, 0.40)), srgb(vec3(0.55, 0.62, 0.75)), N.y * 0.5 + 0.5) * 0.55;
+  return albedo * (sky * open + sun * diff * (1.0 - shadow));
+}
+vec3 sunlight(vec3 albedo, vec3 N, float shadow) { return sunlight(albedo, N, shadow, 1.0); }
 
 float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);

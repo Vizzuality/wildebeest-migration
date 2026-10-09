@@ -141,7 +141,7 @@ void main() {
   vec3 N = normalize(vNormal);
   // Foliage scatters light: wrap the diffuse so the shaded side is not flat black.
   N = normalize(mix(N, vec3(0.0, 1.0, 0.0), 0.35 * vCrown));
-  vec3 lit = sunlight(col, N, cloudShadow(vWorld.xz));
+  vec3 lit = sunlight(col, N, sunShadow(vWorld.xz), skyOpen(vWorld.xz));
 
   gl_FragColor = vec4(lit, 1.0);
   #include <tonemapping_fragment>

@@ -132,7 +132,9 @@ void main() {
   vec3 water = mix(srgb(vec3(0.07, 0.20, 0.27)), srgb(vec3(0.16, 0.36, 0.42)), shimmer * 0.6);
   col = mix(col, water, smoothstep(0.4, 0.9, lake));
 
-  vec3 lit = sunlight(col, N, cloudShadow(xz));
+  float open = skyOpen(xz);
+  // Valleys and the foot of escarpments also lose some bounced sun, not just sky.
+  vec3 lit = sunlight(col, N, sunShadow(xz), open) * mix(0.8, 1.0, open);
   lit += water * lake * pow(max(dot(reflect(-uSunDir, N), vec3(0.0, 1.0, 0.0)), 0.0), 8.0) * 0.08;
   float glint = pow(max(dot(reflect(-uSunDir, vec3(0.0, 1.0, 0.0)), normalize(cameraPosition - vWorld)), 0.0), 60.0);
   lit += srgb(vec3(1.0, 0.9, 0.75)) * glint * river.water * weight * 0.6;

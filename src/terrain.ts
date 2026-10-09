@@ -1,7 +1,8 @@
 import { use } from 'react'
 import * as THREE from 'three'
 import { MAP } from './geo'
-import { shared } from './shaders/common'
+import ReliefWorker from './relief.worker.ts?worker'
+import { SUN_DIR, shared } from './shaders/common'
 
 // Seeded PRNG so the landscape is identical on every load.
 export function mulberry32(seed: number) {
@@ -56,10 +57,35 @@ async function fetchOk(url: string) {
   return res
 }
 
+function toHeights(meta: TerrainMeta, elevation: ArrayBuffer) {
+  return Float32Array.from(new Uint16Array(elevation), (v) => ((v / 10 - meta.base) / 1000) * EXAGGERATION)
+}
+
+/** Runs bakeRelief off the main thread, so it overlaps the rest of the downloads. */
+function reliefInWorker(heights: Float32Array, { nx, nz, step }: TerrainMeta) {
+  return new Promise<Uint8Array>((resolve, reject) => {
+    const worker = new ReliefWorker()
+    worker.onmessage = (e: MessageEvent<Uint8Array>) => {
+      resolve(e.data)
+      worker.terminate()
+    }
+    worker.onerror = (e) => {
+      reject(new Error(`relief worker: ${e.message}`))
+      worker.terminate()
+    }
+    worker.postMessage({ heights, nx, nz, step, sun: SUN_DIR.toArray() })
+  })
+}
+
 async function fetchHeightfield(): Promise<Heightfield> {
-  const [meta, elevation, rawMasks, rawCover, rawVerdor, rawQuemas] = await Promise.all([
-    fetchOk('/terrain/terrain.json').then((r) => r.json() as Promise<TerrainMeta>),
-    fetchOk('/terrain/elevation.bin').then((r) => r.arrayBuffer()),
+  const metaP = fetchOk('/terrain/terrain.json').then((r) => r.json() as Promise<TerrainMeta>)
+  const heightsP = Promise.all([metaP, fetchOk('/terrain/elevation.bin').then((r) => r.arrayBuffer())]).then(([meta, elevation]) =>
+    toHeights(meta, elevation),
+  )
+  const [meta, heights, relief, rawMasks, rawCover, rawVerdor, rawQuemas] = await Promise.all([
+    metaP,
+    heightsP,
+    Promise.all([heightsP, metaP]).then(([h, meta]) => reliefInWorker(h, meta)),
     fetchOk('/terrain/masks.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/cover.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/verdor.bin').then((r) => r.arrayBuffer()),
@@ -68,13 +94,10 @@ async function fetchHeightfield(): Promise<Heightfield> {
   if (meta.minX !== MAP.minX || meta.minZ !== MAP.minZ) throw new Error('terrain bake does not match MAP, run pnpm bake:terrain')
 
   const { nx, nz, step } = meta
-  const dm = new Uint16Array(elevation)
   const bytes = new Uint8Array(rawMasks)
-  const heights = new Float32Array(nx * nz)
   const masks = new Float32Array(nx * nz * 2)
   const cover = Float32Array.from(new Uint8Array(rawCover), (v) => v / 255)
   for (let i = 0; i < nx * nz; i++) {
-    heights[i] = ((dm[i] / 10 - meta.base) / 1000) * EXAGGERATION
     masks[i * 2] = (bytes[i * 2] / 240) * meta.riverMax
     masks[i * 2 + 1] = bytes[i * 2 + 1] / 255
   }
@@ -89,6 +112,7 @@ async function fetchHeightfield(): Promise<Heightfield> {
   shared.uVerdor.value = verdorTextures(new Uint8Array(rawVerdor), nx, nz)
   shared.uQuemas.value = quemasTexture(new Uint8Array(rawQuemas), nx, nz)
   shared.uQuemaMask.value = quemaMaskTexture(new Uint8Array(rawQuemas), nx, nz)
+  shared.uRelief.value = reliefTexture(relief, nx, nz)
 
   const hf = { nx, nz, step, heights, cover, masks }
   return {
@@ -109,6 +133,16 @@ function verdorTextures(verdor: Uint8Array, nx: number, nz: number) {
     tex.needsUpdate = true
     return tex
   })
+}
+
+/** Per cell: sun past the Relieve (R) and open sky (G), from bakeRelief. */
+function reliefTexture(relief: Uint8Array, nx: number, nz: number) {
+  const tex = new THREE.DataTexture(relief, nx, nz, THREE.RGFormat)
+  tex.minFilter = THREE.LinearFilter
+  tex.magFilter = THREE.LinearFilter
+  tex.unpackAlignment = 2
+  tex.needsUpdate = true
+  return tex
 }
 
 /** Usual month of each cell's Quema (1–12, 0 = none). Nearest filtering: months don't blend. */
