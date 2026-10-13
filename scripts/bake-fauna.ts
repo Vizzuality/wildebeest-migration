@@ -9,7 +9,7 @@
 
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { MAP, PLACES, project, RECORRIDO } from '../src/geo.ts'
+import { MAP, PLACES, project, RECORRIDO, RECORRIDO_GACELAS } from '../src/geo.ts'
 
 const CACHE = '.cache/fauna'
 const TERRAIN = 'public/terrain'
@@ -449,8 +449,8 @@ function pacing(knots: { t: number; d: number }[]) {
  * The Recorrido as positions through the year, SAMPLES_PER_MONTH a month: still at each stay,
  * and between stays along the easy way, passing each place on time without stopping there.
  */
-function recorrido(cost: ReturnType<typeof costGrid>, walls: SegmentIndex) {
-  const stops = RECORRIDO.map((s) => {
+function recorrido(cost: ReturnType<typeof costGrid>, walls: SegmentIndex, plan: typeof RECORRIDO) {
+  const stops = plan.map((s) => {
     const place = PLACES.find((p) => p.name === s.place)
     if (!place) throw new Error(`Recorrido: no place called ${s.place} in geo.ts`)
     return { ...s, xz: project(place.at) as Pt }
@@ -501,7 +501,10 @@ const walls = barriers(main, cuts)
 
 console.log('Recorrido:')
 const grid = costGrid(terrain, elevation, masks, cover, main.flatMap((r) => r.lines))
-const path = recorrido(grid, new SegmentIndex(segmentsOf([{ name: 'barrier', lines: walls }])))
+const wallIndex = new SegmentIndex(segmentsOf([{ name: 'barrier', lines: walls }]))
+const path = recorrido(grid, wallIndex, RECORRIDO)
+console.log('Recorrido de las gacelas:')
+const gacelas = recorrido(grid, wallIndex, RECORRIDO_GACELAS)
 const spread = forma(fixes)
 spread.forEach(([xx, xz, zz], m) => {
   const tr = xx + zz
@@ -518,6 +521,7 @@ await writeFile(
     minZ: MAP.minZ,
     samplesPerMonth: SAMPLES_PER_MONTH,
     recorrido: path.map(([x, z]) => [+x.toFixed(2), +z.toFixed(2)]),
+    gacelas: gacelas.map(([x, z]) => [+x.toFixed(2), +z.toFixed(2)]),
     forma: spread,
     barriers: walls.map((l) => l.map(([x, z]) => [+x.toFixed(3), +z.toFixed(3)])),
   }),

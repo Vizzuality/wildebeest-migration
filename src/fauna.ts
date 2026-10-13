@@ -4,6 +4,8 @@ import { MAP } from './geo'
 export interface FaunaBake {
   /** Where the centre of the Manada is through the year, `samplesPerMonth` points a month. */
   recorrido: [number, number][]
+  /** The same for the Thomson's gazelles, who keep to the south and centre of the park. */
+  gacelas: [number, number][]
   samplesPerMonth: number
   /** How far the Manada spreads each month, as a covariance (xx, xz, zz in km²). */
   forma: [number, number, number][]

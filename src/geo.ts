@@ -77,3 +77,11 @@ export const RECORRIDO: { place: string; at: number; until?: number }[] = [
   { place: 'Lobo', at: 10.3 },
   { place: 'Seronera', at: 11.2 },
 ]
+
+// The Thomson's gazelles set off from the plains with the wildebeest but stay behind in the centre
+// of the park through the dry season instead of going north, and go back south with them.
+export const RECORRIDO_GACELAS: typeof RECORRIDO = [
+  { place: 'Ndutu', at: 0, until: 2.5 },
+  { place: 'Kopjes de Moru', at: 3.5 },
+  { place: 'Seronera', at: 4.5, until: 11.2 },
+]
