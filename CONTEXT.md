@@ -23,7 +23,7 @@ La elevación del Lago Victoria, que se toma como altura cero del Relieve.
 _Avoid_: nivel del mar, sea level
 
 **Lago**:
-Agua quieta dentro del Mapa: la orilla oriental del Lago Victoria y partes de los lagos Eyasi, Manyara y Natron. Es la superficie plana que el DEM da a cada lago (en el caso del Victoria, la Cota base).
+Agua quieta dentro del Mapa: la orilla oriental del Lago Victoria, partes de los lagos Eyasi, Manyara y Natron, y los lagos Ndutu y Masek, pequeños y salobres, en las llanuras del sur. Es la superficie plana que el DEM da a cada lago (en el caso del Victoria, la Cota base).
 _Avoid_: agua, water mask, costa
 
 **Exageración vertical**:
