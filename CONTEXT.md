@@ -122,11 +122,3 @@ _Avoid_: cola, atasco, espera
 El cruce en tropel que pone fin a un Agolpamiento: la Manada atraviesa el Cruce de golpe, más deprisa que su paso normal.
 _Avoid_: estampida, cruce masivo
 
-**Partos**:
-La ventana de unas tres semanas, entre finales de enero y febrero, en que nacen las crías de ñu en las llanuras de Ndutu.
-_Avoid_: nacimientos, crías, calving
-
-**Baja**:
-Un animal de la Manada que muere. El grueso cae en los Cruces del Mara durante las Avalanchas; fuera de ahí hay pocas, sueltas a lo largo del año.
-_Avoid_: muerte, mortalidad
-
