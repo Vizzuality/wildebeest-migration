@@ -292,7 +292,7 @@ function drops(): Drop[] {
  * mesh is one species, picked by the species' share of the animals there.
  */
 const ESPECIES = [
-  { name: 'ñu', count: 1.3, ahead: 0, color: [0.55, 0.16, 0.06] },
+  { name: 'ñu', count: 1.3, ahead: 0, color: [0.55, 0.25, 0.95] },
   { name: 'cebra', count: 0.2, ahead: 0.025, color: [0.95, 0.95, 0.92] },
   { name: 'gacela', count: 0.35, ahead: 0, color: [1.0, 0.45, 0.25] },
 ] as const
