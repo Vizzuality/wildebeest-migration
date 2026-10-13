@@ -107,11 +107,11 @@ Cuánto se extiende la Manada en cada mes y en qué dirección se alarga, deriva
 _Avoid_: densidad, heatmap, extensión
 
 **Mancha**:
-La forma en que se ve la Manada a escala de Mapa: un único líquido espeso, como barro, siempre de una pieza, que fluye por el Recorrido. Al trasladarse se estira en una corriente: la cabeza tira y la cola va detrás. En cada parada se encharca. Nunca salta ni se rompe.
-_Avoid_: blob, metaball, líquido, gotas
+La forma en que se ve la Manada a escala de Mapa: un único cuerpo espeso, como barro, siempre de una pieza, que fluye por el Recorrido. Al trasladarse se estira en una corriente: la cabeza tira y la cola va detrás. En cada parada se encharca. Nunca salta ni se rompe. Se dibuja como una malla de puntos rojo oscuro fija al Relieve: los puntos no se mueven, aparecen y se apagan al paso de la Manada. Fuera de la Mancha no hay malla.
+_Avoid_: blob, metaball, líquido, gotas, punteado
 
 **Apiñamiento**:
-Lo apretada que va la Manada en cada punto de la Mancha. Es lo único de los eventos que se ve en la propia Mancha: donde más se apiña, más intenso es su color.
+Lo apretada que va la Manada en cada punto de la Mancha. Es lo único de los eventos que se ve en la propia Mancha: donde más se apiña, más oscuros y más grandes son los puntos de su malla.
 _Avoid_: densidad, superposición, Presencia
 
 **Agolpamiento**:
@@ -133,5 +133,5 @@ _Avoid_: muerte, mortalidad
 ### Señales
 
 **Señal**:
-Una marca gráfica (destello o anillo) que cuenta un evento de la Manada sobre la Mancha, sin tocarla. Es lo único deliberadamente no naturalista del Mapa. Se ancla al lugar y la fecha que dan las fuentes, pero manda que se lea: el evento que cuenta puede alargarse en el calendario, y la Señal dura más que él. Las de Partos salen salpicadas sobre la Mancha, más seguidas en el pico de la ventana; las de Baja, de otro color, se apagan. Ninguna representa a un animal concreto.
+Una marca gráfica (destello o anillo) que cuenta un evento de la Manada sobre la Mancha, sin tocarla. Junto con la Mancha, es lo único deliberadamente no naturalista del Mapa. Se ancla al lugar y la fecha que dan las fuentes, pero manda que se lea: el evento que cuenta puede alargarse en el calendario, y la Señal dura más que él. Las de Partos salen salpicadas sobre la Mancha, más seguidas en el pico de la ventana; las de Baja, de otro color, se apagan. Ninguna representa a un animal concreto.
 _Avoid_: efecto, partícula, FX

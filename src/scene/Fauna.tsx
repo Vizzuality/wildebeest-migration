@@ -33,14 +33,24 @@ const DROP_SIZE = 1.65
  */
 const SIZE_REF_KM = 13
 const SIZE_POWER = 0.3
-/** The field at the liquid's edge, and the field over which it deepens from there. */
+/** The field at the body's edge, and how far either side of it the dots fade out. */
 const EDGE = 0.9
-const EDGE_FROM = 0.15
-const EDGE_FULL = 1.4
-/** The field over which the Apiñamiento goes from none to full, and its glow. */
+const EDGE_SOFT = 0.3
+/** The field over which the Apiñamiento goes from none to full. */
 const CROWD_FROM = 2
 const CROWD_FULL = 9
-const CROWD_GLOW = 0.12
+/**
+ * The Mancha is drawn as a mesh of dots pinned to the Relieve: the dots never move, the Manada
+ * shows them as it passes. MESH_KM apart along the map's axes, DOT_KM across where the Manada is
+ * loosest and DOT_CROWDED_KM where it packs tightest, a deep red, hsl(9 97% 34%), that darkens
+ * as it packs. Once the dots are closer than about a pixel they blur into their mean, so far off
+ * the mesh reads as an even tint instead of shimmering.
+ */
+const MESH_KM = 1
+const DOT_KM = 0.3
+const DOT_CROWDED_KM = 0.4
+/** A dark ring round each dot, so it stands out from the ground. */
+const RING_KM = 0.12
 /**
  * The liquid runs out over green, level grass and draws back off slopes and bare ground, so its
  * edge follows the land it crosses: the field is raised to 1 / land, land running from LAND_POOR
@@ -56,7 +66,7 @@ const LAND_RICH = 1.2
  * so the stream is not broken; WARP_SCALE sets how broad the lobes are (smaller is broader).
  */
 const WARP_KM = 4
-const WARP_MOVING_KM = 1.2
+const WARP_MOVING_KM = 3.5
 const WARP_SCALE = 0.35
 /**
  * The Manada fills a stretch of the Recorrido, from its head CHAIN_HEAD months ahead of the
@@ -269,26 +279,22 @@ varying vec2 vWorld;
 varying float vHeight;
 
 // A thread of liquid from a to b. At its centre line it always reaches 1, above the surface.
-float thread(vec2 p, vec3 a, vec3 b, float r, inout vec2 grad) {
+float thread(vec2 p, vec3 a, vec3 b, float r) {
   vec2 ab = b.xy - a.xy;
   float k = clamp(dot(p - a.xy, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
   vec2 d = p - a.xy - ab * k;
   float d2 = dot(d, d);
   float r2 = r * r;
   if (d2 > r2 * 6.0) return 0.0;
-  float w = exp(-d2 / r2);
-  grad -= 2.0 * d / r2 * w;
-  return w;
+  return exp(-d2 / r2);
 }
 
-// How far p is from a tube from a to b that thins from ra to rb, in radii squared, and which way
-// that grows.
-float tube(vec2 p, vec2 a, vec2 b, float ra, float rb, out vec2 away) {
+// How far p is from a tube from a to b that thins from ra to rb, in radii squared.
+float tube(vec2 p, vec2 a, vec2 b, float ra, float rb) {
   vec2 ab = b - a;
   float k = clamp(dot(p - a, ab) / max(dot(ab, ab), ra * ra), 0.0, 1.0);
   vec2 d = p - a - ab * k;
   float r2 = pow(mix(ra, rb, k), 2.0);
-  away = 2.0 * d / r2;
   return dot(d, d) / r2;
 }
 
@@ -300,10 +306,6 @@ void main() {
     tnoise(lobes + vec2(11.3, -uClock * 0.03)) * 0.7 + tnoise(lobes * 2.3 + vec2(uClock * 0.05, 8.9)) * 0.3
   );
   float field = 0.0;
-  vec2 grad = vec2(0.0);
-  // Where this point sits relative to the drops around it, so the texture travels with them.
-  vec2 local = vec2(0.0);
-  float near = 0.0;
   for (int i = 0; i < ${DROPS}; i++) {
     vec2 d = p - uDrops[i].xy;
     vec2 t = uAxes[i].xy;
@@ -313,79 +315,57 @@ void main() {
     float a = dot(d, t);
     float b = dot(d, n);
     float spread = a * a / ra2 + b * b / r2;
-    // Far and wide, so the texture keeps to the drop all down its body.
-    float wl = exp(-spread * 0.05);
-    local += (d + vec2(float(i) * 37.1, float(i) * 17.3)) * wl;
-    near += wl;
     if (spread > 6.0) continue;
     // Only pooled: on the move the stretch of the way is the whole body.
-    float w = exp(-spread) * (1.0 - uMotion);
-    field += w;
-    grad -= 2.0 * (t * a / ra2 + n * b / r2) * w;
+    field += exp(-spread) * (1.0 - uMotion);
   }
   // Spine along the Recorrido, and each drop's stretch of the way as one tube round the nearest
   // of its points, so it bends smoothly with the way instead of beading where the points meet.
   for (int i = 0; i < ${DROPS}; i++) {
     float best = 1e9;
-    vec2 bestAway = vec2(0.0);
     for (int k = 0; k + 1 < ${CHAIN_POINTS}; k++) {
       vec3 a = uChain[i * ${CHAIN_POINTS} + k];
       vec3 b = uChain[i * ${CHAIN_POINTS} + k + 1];
-      vec2 away;
-      float s = tube(p, a.xy, b.xy, a.z, b.z, away);
-      if (s < best) {
-        best = s;
-        bestAway = away;
-      }
+      best = min(best, tube(p, a.xy, b.xy, a.z, b.z));
     }
     if (best < 6.0) {
-      float w = exp(-best) * mix(1.0, ${STREAM_DEPTH.toFixed(2)}, uMotion);
-      field += w;
-      grad -= bestAway * w;
+      field += exp(-best) * mix(1.0, ${STREAM_DEPTH.toFixed(2)}, uMotion);
     }
     if (i + 1 < ${DROPS}) {
-      field += thread(p, uSpine[i], uSpine[i + 1], min(uSpine[i].z, uSpine[i + 1].z) * 0.55, grad);
+      field += thread(p, uSpine[i], uSpine[i + 1], min(uSpine[i].z, uSpine[i + 1].z) * 0.55);
     }
   }
   float lush = greenOf(verdor(vWorld, 0.5));
   vec2 slope = vec2(heightAt(vWorld + vec2(1.5, 0.0)) - heightAt(vWorld - vec2(1.5, 0.0)), heightAt(vWorld + vec2(0.0, 1.5)) - heightAt(vWorld - vec2(0.0, 1.5))) / 3.0;
   float steep = smoothstep(0.04, 0.2, length(slope));
   float land = mix(${LAND_POOR.toFixed(2)}, ${LAND_RICH.toFixed(2)}, lush * (1.0 - steep));
-  float tamed = pow(max(field, 1e-6), 1.0 / land);
-  grad *= tamed / max(field, 1e-6) / land;
-  field = tamed;
+  field = pow(max(field, 1e-6), 1.0 / land);
 
-  // A clean rim, only antialiased; inside it the liquid runs deeper towards the middle.
-  float aa = fwidth(field);
-  float edge = smoothstep(${EDGE.toFixed(2)} - aa, ${EDGE.toFixed(2)} + aa, field);
-  float body = smoothstep(${EDGE_FROM.toFixed(2)}, ${EDGE_FULL.toFixed(2)}, field);
-  float alpha = edge * 0.9;
-  if (alpha < 0.005) discard;
-  // At a third of the distance, so the swirls stay broad across the body.
-  local *= 0.33 / max(near, 1e-6);
-
-  // A lazy swirl over the surface, all year round.
-  vec2 swirlAt = local * 0.6 + vec2(uClock * 0.05, -uClock * 0.04);
-  float swirl = tnoise(swirlAt);
-  vec2 ripple = vec2(tnoise(swirlAt + vec2(0.4, 0.0)) - swirl, tnoise(swirlAt + vec2(0.0, 0.4)) - swirl) * body * body;
-
-  // The surface bulges a little where the liquid runs deep, and ripples, so the sun models it.
-  vec3 normal = normalize(vec3(-grad.x * 0.6 - ripple.x * 1.5, 1.0, -grad.y * 0.6 - ripple.y * 1.5));
+  // The dots fade and shrink out towards the rim, so it keeps its lobes without stair-stepping.
+  float rim = smoothstep(${(EDGE - EDGE_SOFT).toFixed(2)}, ${(EDGE + EDGE_SOFT).toFixed(2)}, field);
+  if (rim < 0.005) discard;
   // Apiñamiento: the more drops pile up on a point, the more packed the Manada is there.
   float crowd = smoothstep(${CROWD_FROM.toFixed(1)}, ${CROWD_FULL.toFixed(1)}, field);
-  // It packs warm round its middle, pooled or on the move.
+  // It packs round its middle, pooled or on the move.
   crowd = max(crowd, smoothstep(0.6, 2.6, field));
-  float grain = tnoise(local * 3.0) * 0.5 + tnoise(local * 9.0) * 0.3;
-  vec3 albedo = mix(vec3(0.2, 0.16, 0.12), vec3(0.38, 0.2, 0.08), crowd);
-  albedo *= 1.0 + grain * 0.18;
-  vec3 lit = sunlight(srgb(albedo), normal, sunShadow(vWorld));
-  // Packed tight it glows a little on top of the light, so the crowd reads even in shadow.
-  lit += srgb(vec3(0.62, 0.3, 0.08)) * crowd * crowd * ${CROWD_GLOW.toFixed(2)} * body;
-  // Wet: the sun glints off it.
-  vec3 view = normalize(cameraPosition - vec3(vWorld.x, vHeight, vWorld.y));
-  float glint = pow(max(dot(normal, normalize(uSunDir + view)), 0.0), 60.0);
-  lit += srgb(vec3(1.0, 0.85, 0.65)) * glint * 0.35 * body * (1.0 - sunShadow(vWorld));
-  gl_FragColor = vec4(lit, alpha);
+
+  // The nearest dot of the mesh, on the ground itself rather than the warped body.
+  vec2 cell = vWorld / ${MESH_KM.toFixed(2)};
+  float dist = length(fract(cell) - 0.5) * ${MESH_KM.toFixed(2)};
+  float radius = mix(${DOT_KM.toFixed(2)}, ${DOT_CROWDED_KM.toFixed(2)}, crowd) * mix(0.4, 1.0, rim);
+  float aa = fwidth(dist);
+  float ring = radius + ${RING_KM.toFixed(2)} * mix(0.4, 1.0, rim);
+  float core = 1.0 - smoothstep(radius - aa, radius + aa, dist);
+  float shine = 1.0 - smoothstep(ring - aa, ring + aa, dist);
+  // How much of a cell the dot covers, for where the cells are too small to tell apart.
+  float mean = 3.14159 * ring * ring / ${(MESH_KM * MESH_KM).toFixed(4)};
+  float blur = smoothstep(0.5, 0.9, length(fwidth(cell)));
+  float alpha = mix(shine, mean, blur) * rim;
+  if (alpha < 0.005) discard;
+  // Blurred, the ring's share of the dot tints it darker.
+  float red = mix(core / max(shine, 1e-3), radius * radius / (ring * ring), blur);
+  vec3 lit = srgb(mix(vec3(0.07, 0.04, 0.03), vec3(0.67, 0.109, 0.01) * mix(1.0, 0.75, crowd), clamp(red, 0.0, 1.0)));
+  gl_FragColor = vec4(lit, alpha * 0.8);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }
