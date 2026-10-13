@@ -30,11 +30,15 @@ const USER_AGENT = 'serengeti-migration terrain bake'
 // Each lake floods from its seed points, so inland flats at the same level stay dry. Speke
 // Gulf needs its own seed: it only joins the open lake west of the Mapa.
 // Natron's bed is soda flats rather than open water, so it is only flat to within a few metres.
+// Ndutu and Masek are the small soda lakes on the plains; Masek's surface is a couple of DEM
+// cells, only flat to within a few metres too.
 const LAKES: { name: string; level: number; margin?: number; seeds: [number, number][] }[] = [
   { name: 'Victoria', level: 1134, seeds: [[33.6, -1.1], [33.6, -2.2]] },
   { name: 'Eyasi', level: 1027, seeds: [[35.27, -3.42]] },
   { name: 'Manyara', level: 954, seeds: [[35.827, -3.553]] },
   { name: 'Natron', level: 600, margin: 5, seeds: [[35.95, -2.4]] },
+  { name: 'Ndutu', level: 1588, seeds: [[34.998, -3.0]] },
+  { name: 'Masek', level: 1591, margin: 2.5, seeds: [[35.04, -3.027]] },
 ]
 const BASE = LAKES[0].level
 /** Default metres above a lake's level that still count as Lago. */
