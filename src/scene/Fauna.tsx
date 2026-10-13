@@ -46,11 +46,18 @@ const CROWD_FULL = 9
  * as it packs. Once the dots are closer than about a pixel they blur into their mean, so far off
  * the mesh reads as an even tint instead of shimmering.
  */
-const MESH_KM = 1
-const DOT_KM = 0.3
-const DOT_CROWDED_KM = 0.4
+const MESH_KM = 0.7
+const DOT_KM = 0.21
+const DOT_CROWDED_KM = 0.28
 /** A dark ring round each dot, so it stands out from the ground. */
-const RING_KM = 0.12
+const RING_KM = 0.085
+/**
+ * A perfectly regular mesh in motion makes waves the eye invents, and moiré against the pixels.
+ * Each dot is nudged off its place by up to JITTER of the spacing and drawn up to SIZE_SPREAD
+ * bigger or smaller, the same for every frame, so the rows still read but nothing repeats.
+ */
+const JITTER = 0.25
+const SIZE_SPREAD = 0.25
 /**
  * The liquid runs out over green, level grass and draws back off slopes and bare ground, so its
  * edge follows the land it crosses: the field is raised to 1 / land, land running from LAND_POOR
@@ -349,12 +356,28 @@ void main() {
   // It packs round its middle, pooled or on the move.
   crowd = max(crowd, smoothstep(0.6, 2.6, field));
 
-  // The nearest dot of the mesh, on the ground itself rather than the warped body.
+  // The nearest dot of the mesh, on the ground itself rather than the warped body. A nudged dot
+  // can reach into the next cell, so the cells around are looked at too.
   vec2 cell = vWorld / ${MESH_KM.toFixed(2)};
-  float dist = length(fract(cell) - 0.5) * ${MESH_KM.toFixed(2)};
-  float radius = mix(${DOT_KM.toFixed(2)}, ${DOT_CROWDED_KM.toFixed(2)}, crowd) * mix(0.4, 1.0, rim);
-  float aa = fwidth(dist);
-  float ring = radius + ${RING_KM.toFixed(2)} * mix(0.4, 1.0, rim);
+  float base = mix(${DOT_KM.toFixed(2)}, ${DOT_CROWDED_KM.toFixed(2)}, crowd) * mix(0.4, 1.0, rim);
+  float edging = ${RING_KM.toFixed(3)} * mix(0.4, 1.0, rim);
+  float dist = 1e9;
+  float radius = base;
+  float ring = base + edging;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 id = floor(cell) + vec2(float(i), float(j));
+      vec2 nudge = (vec2(hash12(id), hash12(id + 71.3)) - 0.5) * ${(2 * JITTER).toFixed(2)};
+      float d = length(cell - id - 0.5 - nudge) * ${MESH_KM.toFixed(2)};
+      float r = base * (1.0 + (hash12(id + 19.7) - 0.5) * ${(2 * SIZE_SPREAD).toFixed(2)});
+      if (d - r - edging < dist - ring) {
+        dist = d;
+        radius = r;
+        ring = r + edging;
+      }
+    }
+  }
+  float aa = length(fwidth(vWorld)) * 0.7;
   float core = 1.0 - smoothstep(radius - aa, radius + aa, dist);
   float shine = 1.0 - smoothstep(ring - aa, ring + aa, dist);
   // How much of a cell the dot covers, for where the cells are too small to tell apart.
