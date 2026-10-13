@@ -91,7 +91,7 @@ _Avoid_: niebla de guerra, fog, fog of war, fade del borde
 ### Fauna
 
 **Manada**:
-Los animales que migran juntos por el ciclo anual: ñus, cebras y gacelas de Thomson (los elands, pocos, se dejan fuera). A escala de Mapa se ve como una sola Mancha. Su número no cambia a lo largo del año: los Partos y las Bajas se cuentan con Señales, no con el tamaño de la Mancha. No incluye a los Residentes.
+Los animales que migran juntos por el ciclo anual: ñus, cebras y gacelas de Thomson (los elands, pocos, se dejan fuera). A escala de Mapa cada especie se ve como su propia Mancha. Su número no cambia a lo largo del año. No incluye a los Residentes.
 _Avoid_: herd, rebaño, migración, animales
 
 **Residente**:
@@ -99,7 +99,7 @@ Un animal que vive todo el año en la misma zona y no sigue a la Manada: jirafa 
 _Avoid_: fauna local, animales de fondo
 
 **Recorrido**:
-La sucesión de lugares con nombre y fechas por la que pasa el centro de la Manada a lo largo del año: Ndutu (enero a mediados de marzo), Kopjes de Moru (abril), Seronera (mayo), Corredor occidental (junio), Kogatende (julio), Triángulo del Mara (agosto y septiembre, al otro lado del Mara), Kogatende (octubre), Lobo (noviembre) y de vuelta por Seronera a Ndutu (diciembre). Los lugares y las fechas se marcan a mano, como lo cuentan las fuentes; entre un lugar y el siguiente sigue el paso fácil por el Relieve, lejos de las orillas de los Ríos principales, y los cruza de frente y solo por sus Cruces.
+La sucesión de lugares con nombre y fechas por la que pasa el centro de los ñus a lo largo del año: Ndutu (enero a mediados de marzo), Kopjes de Moru (abril), Seronera (mayo), Corredor occidental (junio), Kogatende (julio), Triángulo del Mara (agosto y septiembre, al otro lado del Mara), Kogatende (octubre), Lobo (noviembre) y de vuelta por Seronera a Ndutu (diciembre). Los lugares y las fechas se marcan a mano, como lo cuentan las fuentes; entre un lugar y el siguiente sigue el paso fácil por el Relieve, lejos de las orillas de los Ríos principales, y los cruza de frente y solo por sus Cruces. Las cebras siguen el mismo Recorrido mezcladas con la cabeza de los ñus, apenas por delante. Las gacelas de Thomson salen de Ndutu con los ñus, pero se quedan en Seronera de mayo a principios de diciembre en vez de ir al norte, y vuelven al sur con ellos.
 _Avoid_: ruta, trayectoria, path
 
 **Presencia**:
@@ -107,7 +107,7 @@ Cuánto se extiende la Manada en cada mes y en qué dirección se alarga, deriva
 _Avoid_: densidad, heatmap, extensión
 
 **Mancha**:
-La forma en que se ve la Manada a escala de Mapa: un único cuerpo espeso, como barro, siempre de una pieza, que fluye por el Recorrido. Al trasladarse se estira en una corriente: la cabeza tira y la cola va detrás. En cada parada se encharca. Nunca salta ni se rompe. Se dibuja como una malla de puntos rojo oscuro fija al Relieve: los puntos no se mueven, aparecen y se apagan al paso de la Manada. Fuera de la Mancha no hay malla.
+La forma en que se ve cada especie de la Manada a escala de Mapa: un único cuerpo espeso, como barro, siempre de una pieza, que fluye por el Recorrido. Al trasladarse se estira en una corriente: la cabeza tira y la cola va detrás. En cada parada se encharca. Nunca salta ni se rompe. Las Manchas de distintas especies se funden en un solo cuerpo donde coinciden y se separan donde sus Recorridos se apartan. Se dibuja como una malla de puntos fija al Relieve: cada punto es de una especie, no se mueve, y aparece y se apaga al paso de la Manada. Fuera de la Mancha no hay malla.
 _Avoid_: blob, metaball, líquido, gotas, punteado
 
 **Apiñamiento**:
@@ -115,7 +115,7 @@ Lo apretada que va la Manada en cada punto de la Mancha. Es lo único de los eve
 _Avoid_: densidad, superposición, Presencia
 
 **Agolpamiento**:
-La espera de la Manada en la orilla de un Cruce: la cabeza se para, la cola sigue llegando y la Mancha se encharca contra el río. Dura más cuanto más Caudal lleva el río y es sobre todo cosa del Mara, que se pasa en Kogatende a la ida y a la vuelta; en el Grumeti y el Mbalageti apenas hay espera.
+La espera de la Manada en la orilla de un Cruce: la cabeza se para, la cola sigue llegando y la Mancha se encharca contra el río. Dura más cuanto más Caudal lleva el río y es sobre todo cosa del Mara, que se pasa en Kogatende a la ida y a la vuelta; en el Grumeti y el Mbalageti apenas hay espera. Las cebras, que van en la cabeza, llegan algo antes y cruzan primero.
 _Avoid_: cola, atasco, espera
 
 **Avalancha**:
@@ -130,8 +130,3 @@ _Avoid_: nacimientos, crías, calving
 Un animal de la Manada que muere. El grueso cae en los Cruces del Mara durante las Avalanchas; fuera de ahí hay pocas, sueltas a lo largo del año.
 _Avoid_: muerte, mortalidad
 
-### Señales
-
-**Señal**:
-Una marca gráfica (destello o anillo) que cuenta un evento de la Manada sobre la Mancha, sin tocarla. Junto con la Mancha, es lo único deliberadamente no naturalista del Mapa. Se ancla al lugar y la fecha que dan las fuentes, pero manda que se lea: el evento que cuenta puede alargarse en el calendario, y la Señal dura más que él. Las de Partos salen salpicadas sobre la Mancha, más seguidas en el pico de la ventana; las de Baja, de otro color, se apagan. Ninguna representa a un animal concreto.
-_Avoid_: efecto, partícula, FX
