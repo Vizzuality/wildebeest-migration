@@ -12,6 +12,15 @@ import { sitioAt } from './sitio'
 
 /** How fast the air moves when the viewer has asked for less motion. */
 const CALM_PACE = 0.3
+/**
+ * Polvo comes and goes with the Manada's pace and every Chubasco, far quicker than the eye wants a
+ * cloud to change. Its strength is eased over this long (s) before it reshapes the billows, and it
+ * only shows or clears past a gap of two thresholds, fading over FADE seconds each time.
+ */
+const DUST_EASE = 4
+const DUST_ON = 0.12
+const DUST_OFF = 0.04
+const DUST_FADE = 3
 
 // Everything here sits between the eye and the Mapa: none of it is anchored to the ground, so it
 // reads the screen only. Each Meteoro has a ceiling on how much it can hide, low enough that the
@@ -20,6 +29,7 @@ const fragment = /* glsl */ `
 uniform float uLluvia;
 uniform float uNubes;
 uniform float uPolvo;
+uniform float uPolvoVisible;
 uniform float uHumo;
 uniform float uReverbero;
 uniform float uTime;
@@ -137,16 +147,31 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
     c = mix(c, uSmoke * 0.35, ash * uHumo * 0.6);
   }
 
-  if (uPolvo > 0.0) {
-    // Lit billows, paler than the dry ground beneath, or they vanish into it. Even a little dust
-    // has to show, so its strength is lifted towards full.
-    float dust = pow(uPolvo, 0.6);
-    vec2 dp = p * 3.2 - wind * uTime * 0.12;
-    float cloud = fbm(dp + 0.8 * vec2(fbm(dp * 0.6 + 5.2), fbm(dp * 0.6 - 2.4)));
-    float billow = smoothstep(0.45, 0.7, cloud);
-    c = mix(c, uDust * (0.9 + 0.6 * cloud), dust * (0.06 + 0.5 * billow));
-    float mote = specks(p, 30.0, vec2(-0.45, 0.05), 1.0, 0.06);
-    c = mix(c, uDust * 1.6, mote * dust * 0.75);
+  if (uPolvoVisible > 0.0) {
+    // Lit billows, paler than the dry ground beneath, or they vanish into it. How much dust there
+    // is shows in their shape, not their opacity: a few loose wisps, then denser clumps. Opacity
+    // only fades it in and out, and stays light so the ground reads through.
+    float present = smoothstep(0.0, 1.0, uPolvoVisible);
+    float cover = mix(0.66, 0.5, smoothstep(0.1, 0.8, uPolvo));
+    // Nothing here travels. The clumps the dust gathers in stay put, swelling and fading slowly,
+    // with clear air between them; inside them it only turns over.
+    float t = uTime * 0.03;
+    vec2 breathe = vec2(cos(t), sin(t * 1.3)) * 0.8;
+    float clump = smoothstep(0.5, 0.72, vnoise(p * 1.4 + breathe) * 0.7 + vnoise(p * 3.3 - breathe + 9.0) * 0.3);
+    // Inside each clump it turns over lazily, round and round, never going anywhere.
+    float roll = uTime * 0.03;
+    vec2 churn = vec2(cos(roll), sin(roll)) * 1.2 + vec2(sin(roll * 1.7), cos(roll * 2.3)) * 0.5;
+    // Lying low in flat sheets over the ground. Rising columns read as flames over the Quemas.
+    vec2 dp = vec2(p.x * 2.2, p.y * 4.6);
+    vec2 warp = vec2(fbm(dp * 0.6 + 5.2 + churn), fbm(dp * 0.6 - 2.4 - churn.yx));
+    float cloud = fbm(dp + 0.7 * warp);
+    // Soft wisps at the edges.
+    float wisp = fbm(dp * 2.6 + warp * 0.9);
+    cloud += (wisp - 0.5) * 0.12;
+    float billow = smoothstep(cover - 0.1 * clump, cover - 0.1 * clump + 0.16, cloud) * clump;
+    c = mix(c, uDust * (0.9 + 0.4 * cloud), present * 0.16 * billow);
+    float mote = specks(p, 34.0, vec2(0.0), 1.0, 0.055);
+    c = mix(c, uDust * 1.4, mote * clump * present * 0.3);
   }
 
   if (uLluvia > 0.0) {
@@ -174,6 +199,7 @@ class MeteorosEffect extends Effect {
         ['uLluvia', new THREE.Uniform(0)],
         ['uNubes', new THREE.Uniform(0)],
         ['uPolvo', new THREE.Uniform(0)],
+        ['uPolvoVisible', new THREE.Uniform(0)],
         ['uHumo', new THREE.Uniform(0)],
         ['uReverbero', new THREE.Uniform(0)],
         ['uTime', new THREE.Uniform(0)],
@@ -208,14 +234,21 @@ export function Meteoros() {
 
   const time = useRef(0)
   const last = useRef(shared.uClock.value)
+  const dust = useRef({ strength: 0, on: false, visible: 0 })
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     const month = useStore.getState().month
     const now = meteoros(month, sitioAt(raw, hf, lluvia, month), calma.current)
     const u = effect.uniforms
     u.get('uLluvia')!.value = now.lluvia
     u.get('uNubes')!.value = now.nubes
-    u.get('uPolvo')!.value = now.polvo
+    const dt = Math.min(delta, 0.1)
+    const d = dust.current
+    d.strength += (now.polvo - d.strength) * (1 - Math.exp(-dt / DUST_EASE))
+    d.on = d.on ? d.strength > DUST_OFF : d.strength > DUST_ON
+    d.visible = THREE.MathUtils.clamp(d.visible + (d.on ? dt : -dt) / DUST_FADE, 0, 1)
+    u.get('uPolvo')!.value = d.strength
+    u.get('uPolvoVisible')!.value = d.visible
     u.get('uHumo')!.value = now.humo
     u.get('uReverbero')!.value = now.reverbero
     // Its own clock, so asking for less motion slows the streaks and drift, not just dims them.
