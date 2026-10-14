@@ -94,6 +94,11 @@ const HALO_ALPHA = 0.35
  */
 const FAR_BOOST = 2
 /**
+ * The Manada gives off light of its own: an aura in its species' colours over the whole body,
+ * AURA strong where it is thickest, added to the ground under it rather than laid over it.
+ */
+const AURA = 1.6
+/**
  * A perfectly regular mesh in motion makes waves the eye invents, and moiré against the pixels.
  * Each dot is nudged off its place by up to JITTER of the spacing and drawn up to SIZE_SPREAD
  * bigger or smaller, the same for every frame, so the rows still read but nothing repeats.
@@ -541,8 +546,10 @@ void main() {
   // No bulb lights a rock face: a dot's edge or halo over the dark shadow under a cliff reads as a
   // red streak.
   vec2 slope = vec2(heightAt(vWorld + vec2(0.3, 0.0)) - heightAt(vWorld - vec2(0.3, 0.0)), heightAt(vWorld + vec2(0.0, 0.3)) - heightAt(vWorld - vec2(0.0, 0.3))) / 0.6;
-  alpha *= 1.0 - smoothstep(0.15, 0.35, length(slope));
-  if (alpha < 0.005) discard;
+  float rock = 1.0 - smoothstep(0.15, 0.35, length(slope));
+  alpha *= rock;
+  float body = ${AURA.toFixed(2)} * smoothstep(${(EDGE - DOT_GROW - 0.3).toFixed(2)}, ${(EDGE + 2).toFixed(2)}, field) * rock;
+  if (alpha < 0.005 && body < 0.005) discard;
   vec3 colour = (uColors[0] * kind.x + uColors[1] * kind.y + uColors[2] * kind.z) / max(kind.x + kind.y + kind.z, 1e-3);
   vec3 tint = srgb(colour * mix(1.0, 0.75, crowd));
   // Towards the middle the glass burns up to SHINE.
@@ -563,7 +570,14 @@ void main() {
   // its glare.
   vec3 average = mix(glow, mix(tint, pale, ${HOT.toFixed(2)}) * glare, 1.0 / 6.0);
   lit = mix(lit, average, blur);
-  gl_FragColor = vec4(lit, alpha);
+  float heads = 1e-6;
+  vec3 aura = vec3(0.0);
+  for (int s = 0; s < ${ESPECIES.length}; s++) {
+    aura += uColors[s] * own[s] * uHeads[s];
+    heads += own[s] * uHeads[s];
+  }
+  // Premultiplied, so the aura adds light where the dots leave the ground showing.
+  gl_FragColor = vec4(lit * alpha + srgb(aura / heads) * body, alpha);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }
@@ -1151,6 +1165,7 @@ export function Fauna() {
         fragmentShader: fragment,
         uniforms: { ...shared, ...uniforms },
         transparent: true,
+        premultipliedAlpha: true,
         depthWrite: false,
         side: THREE.DoubleSide,
         polygonOffset: true,
