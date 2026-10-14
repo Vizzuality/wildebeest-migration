@@ -51,9 +51,13 @@ export const PLACES: { name: string; at: LonLat; kind?: 'country' | 'water' | 'r
   { name: 'Kopjes de Moru', at: [34.76, -2.72] },
   { name: 'Corredor occidental', at: [34.42, -2.3] },
   { name: 'Kogatende', at: [34.88, -1.64] },
+  // Where the collars head north in mid-July, between the Western Corridor and the Mara. Sources
+  // name the area but no gazetteer has the kopjes, so it sits on the collars' median.
+  { name: 'Wogakuria', at: [35.0, -1.85] },
   { name: 'Masái Mara', at: [35.12, -1.3] },
-  // West of the Mara, so the Manada crosses the river to get there and again to come back.
-  { name: 'Triángulo del Mara', at: [34.907, -1.407] },
+  // West of the Mara, so the Manada crosses the river to get there and again to come back. Where
+  // the collars on that bank are in August and September: the south of the Triangle, near the river.
+  { name: 'Triángulo del Mara', at: [34.907, -1.479] },
   { name: 'Lobo', at: [35.17, -1.98] },
   { name: 'Ngorongoro', at: [35.58, -3.18] },
   { name: 'Lago Victoria', at: [33.65, -1.15], kind: 'water' },
@@ -71,9 +75,18 @@ export const RECORRIDO: { place: string; at: number; until?: number }[] = [
   { place: 'Kopjes de Moru', at: 3.5 },
   { place: 'Seronera', at: 4.5 },
   { place: 'Corredor occidental', at: 5.5 },
+  { place: 'Wogakuria', at: 6.4 },
   { place: 'Kogatende', at: 6.7 },
   { place: 'Triángulo del Mara', at: 7.5, until: 9 },
   { place: 'Kogatende', at: 9.5 },
   { place: 'Lobo', at: 10.3 },
   { place: 'Seronera', at: 11.2 },
+]
+
+// The Thomson's gazelles set off from the plains with the wildebeest but stay behind in the centre
+// of the park through the dry season instead of going north, and go back south with them.
+export const RECORRIDO_GACELAS: typeof RECORRIDO = [
+  { place: 'Ndutu', at: 0, until: 2.5 },
+  { place: 'Kopjes de Moru', at: 3.5 },
+  { place: 'Seronera', at: 4.5, until: 11.2 },
 ]

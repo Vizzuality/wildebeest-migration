@@ -1,7 +1,8 @@
 import { Html, Line } from '@react-three/drei'
 import { useCallback, useMemo } from 'react'
 import * as THREE from 'three'
-import { MAP, PLACES, borderLat, project } from '../geo'
+import { corteOf, inCorte } from '../corte'
+import { PLACES, borderLat, project } from '../geo'
 import { snapToRiver, useHeightfield } from '../terrain'
 
 function useLift() {
@@ -10,16 +11,18 @@ function useLift() {
 }
 
 export function Border() {
+  const hf = useHeightfield()
   const lift = useLift()
   const points = useMemo(() => {
+    const corte = corteOf(hf)
     const out: THREE.Vector3[] = []
     for (let lon = 33.4; lon <= 35.8; lon += 0.01) {
       const [x, z] = project([lon, borderLat(lon)])
-      if (x < MAP.minX || x > MAP.maxX || z < MAP.minZ || z > MAP.maxZ) continue
+      if (!inCorte(corte, x, z)) continue
       out.push(lift(x, z, 0.5))
     }
     return out
-  }, [lift])
+  }, [hf, lift])
   return <Line points={points} color="#ffffff" lineWidth={1} dashed dashSize={1.2} gapSize={1.2} transparent opacity={0.55} />
 }
 

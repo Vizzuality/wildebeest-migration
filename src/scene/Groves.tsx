@@ -2,6 +2,7 @@ import { useFrame } from '@react-three/fiber'
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { corteOf, inCorte } from '../corte'
 import { MAP } from '../geo'
 import { GLSL_COMMON, shared } from '../shaders/common'
 import { mulberry32, useHeightfield, type Heightfield } from '../terrain'
@@ -167,9 +168,11 @@ function place(hf: Heightfield): Placed {
   const out: Placed = { acacia: new Map(), round: new Map(), shrub: new Map() }
   const q = new THREE.Quaternion()
   const up = new THREE.Vector3(0, 1, 0)
+  const corte = corteOf(hf)
   const put = (kind: Kind, x: number, z: number) => {
     const s = 0.8 + rnd() * 0.5
     q.setFromAxisAngle(up, rnd() * Math.PI * 2)
+    if (!inCorte(corte, x, z)) return
     const m = new THREE.Matrix4().compose(new THREE.Vector3(x, hf.heightAt(x, z) - 0.004, z), q, new THREE.Vector3(s, s, s))
     const key = `${Math.floor((x - MAP.minX) / CHUNK)},${Math.floor((z - MAP.minZ) / CHUNK)}`
     const bucket = out[kind].get(key) ?? []
