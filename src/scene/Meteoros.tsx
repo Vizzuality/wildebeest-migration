@@ -3,16 +3,13 @@ import { Effect } from 'postprocessing'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { useFauna } from '../fauna'
-import { MAP } from '../geo'
 import { useLluvia } from '../lluvia'
-import { type Sitio, mensual, meteoros, quemaCerca, smoothstep } from '../meteoros'
-import { NDVI_DRY, NDVI_LUSH, shared } from '../shaders/common'
+import { meteoros } from '../meteoros'
+import { shared } from '../shaders/common'
 import { useStore } from '../store'
 import { useHeightfield } from '../terrain'
-import { manadaAt, pasoAt } from './Fauna'
+import { sitioAt } from './sitio'
 
-/** How far round the Manada a Quema's smoke reaches the viewer (km). */
-const SMOKE_KM = 25
 /** How fast the air moves when the viewer has asked for less motion. */
 const CALM_PACE = 0.3
 
@@ -29,7 +26,38 @@ uniform float uTime;
 uniform vec3 uDust;
 uniform vec3 uSmoke;
 
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+// Dave Hoskins' hash: no sin(), so it holds up as the coordinates grow with the clock.
+float hash(vec2 p) {
+  vec3 q = fract(vec3(p.xyx) * 0.1031);
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.x + q.y) * q.z);
+}
+
+// Simplex 2D noise (Ashima / Ian McEwan, MIT): no square lattice to show through when the
+// smoke and dust are cut with hard thresholds.
+vec3 permute3(vec3 x) { return mod(((x * 34.0) + 1.0) * x, 289.0); }
+float snoise(vec2 v) {
+  const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+  vec2 i = floor(v + dot(v, C.yy));
+  vec2 x0 = v - i + dot(i, C.xx);
+  vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+  vec4 x12 = x0.xyxy + C.xxzz;
+  x12.xy -= i1;
+  i = mod(i, 289.0);
+  vec3 p = permute3(permute3(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+  vec3 m = max(0.5 - vec3(dot(x0, x0), dot(x12.xy, x12.xy), dot(x12.zw, x12.zw)), 0.0);
+  m = m * m;
+  m = m * m;
+  vec3 x = 2.0 * fract(p * C.www) - 1.0;
+  vec3 h = abs(x) - 0.5;
+  vec3 ox = floor(x + 0.5);
+  vec3 a0 = x - ox;
+  m *= 1.79284291400159 - 0.85373472095314 * (a0 * a0 + h * h);
+  vec3 g;
+  g.x = a0.x * x0.x + h.x * x0.y;
+  g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+  return 130.0 * dot(m, g);
+}
 
 float vnoise(vec2 p) {
   vec2 i = floor(p);
@@ -38,15 +66,17 @@ float vnoise(vec2 p) {
   return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
 }
 
+// About 0–1. Each octave is turned, so their features never line up along the axes.
 float fbm(vec2 p) {
+  const mat2 turn = mat2(0.8, 0.6, -0.6, 0.8);
   float sum = 0.0;
   float amp = 0.5;
   for (int i = 0; i < 4; i++) {
-    sum += amp * vnoise(p);
-    p = p * 2.03 + 17.1;
+    sum += amp * snoise(p);
+    p = turn * p * 2.03 + 17.1;
     amp *= 0.5;
   }
-  return sum;
+  return 0.5 + 0.5 * sum;
 }
 
 // One sheet of falling streaks. Cells are tall and thin; a streak sits in some of them, slanted
@@ -64,24 +94,25 @@ float rainSheet(vec2 p, float scale, float speed, float density, float seed) {
 }
 
 // Specks drifting on the air: dust or ash, a few per cell, wandering slowly.
-float specks(vec2 p, float scale, vec2 drift, float seed) {
+float specks(vec2 p, float scale, vec2 drift, float seed, float size) {
   vec2 q = p * scale - drift * uTime;
   vec2 cell = floor(q);
   vec2 f = fract(q);
   float h = hash(cell + seed);
   if (h > 0.35) return 0.0;
-  vec2 at = vec2(hash(cell + seed + 1.7), hash(cell + seed + 4.2)) * 0.8 + 0.1;
-  at += 0.08 * vec2(sin(uTime * 0.7 + h * 40.0), cos(uTime * 0.9 + h * 30.0));
-  return 1.0 - smoothstep(0.0, 0.05, length(f - at));
+  // Kept clear of the cell's edge, or the speck is clipped square.
+  vec2 at = vec2(hash(cell + seed + 1.7), hash(cell + seed + 4.2)) * 0.5 + 0.25;
+  at += 0.06 * vec2(sin(uTime * 0.7 + h * 40.0), cos(uTime * 0.9 + h * 30.0));
+  return 1.0 - smoothstep(size * 0.4, size, length(f - at));
 }
 
-// The Reverbero: hot air bends the light, so the whole picture wavers by a pixel or two.
+// The Reverbero: hot air bends the light, so the whole picture wavers by under a pixel.
 void mainUv(inout vec2 uv) {
   if (uReverbero <= 0.0) return;
   vec2 p = uv * vec2(resolution.x / resolution.y, 1.0) * 22.0;
-  float a = vnoise(p + vec2(0.0, -uTime * 2.2)) - 0.5;
-  float b = vnoise(p * 1.7 + vec2(uTime * 1.3, 0.0)) - 0.5;
-  uv += vec2(b * 0.5, a) * uReverbero * 0.0022;
+  float a = vnoise(p + vec2(0.0, -uTime * 1.4)) - 0.5;
+  float b = vnoise(p * 1.7 + vec2(uTime * 0.8, 0.0)) - 0.5;
+  uv += vec2(b * 0.5, a) * uReverbero * 0.0008;
 }
 
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
@@ -95,31 +126,39 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   }
 
   if (uHumo > 0.0) {
-    // Comes in from the side the wind blows from and thins out across the picture.
-    float reach = smoothstep(-0.3, 1.2, uv.x);
-    float wisp = smoothstep(0.3, 0.8, fbm(vec2(p.x * 1.6, p.y * 3.0) - wind * uTime * 0.03));
-    c = mix(c, uSmoke * (0.8 + 0.4 * wisp), uHumo * 0.32 * reach * (0.45 + 0.55 * wisp));
-    float ash = specks(p, 34.0, vec2(-0.25, -0.12), 5.0);
-    c = mix(c, uSmoke * 0.45, ash * uHumo * 0.5);
+    // Comes in from the side the wind blows from and thins out across the picture. Cool grey
+    // in soft banks, so it doesn't read as more of the warm Bruma.
+    float reach = smoothstep(-0.2, 0.8, uv.x);
+    vec2 sp = vec2(p.x * 2.2, p.y * 3.4) - wind * uTime * 0.08;
+    float body = fbm(sp + 0.5 * vec2(fbm(sp * 0.5 + 3.7), fbm(sp * 0.5 - 1.9)));
+    float bank = smoothstep(0.42, 0.78, body);
+    c = mix(c, uSmoke * (0.6 + 0.3 * body), uHumo * reach * (0.06 + 0.45 * bank));
+    float ash = specks(p, 22.0, vec2(-0.3, -0.12), 5.0, 0.06);
+    c = mix(c, uSmoke * 0.35, ash * uHumo * 0.6);
   }
 
   if (uPolvo > 0.0) {
-    float cloud = fbm(p * 2.4 - wind * uTime * 0.05);
-    c = mix(c, uDust * (0.75 + 0.5 * cloud), uPolvo * 0.3 * (0.5 + 0.8 * cloud));
-    float mote = specks(p, 46.0, vec2(-0.35, 0.05), 1.0);
-    c = mix(c, uDust * 1.3, mote * uPolvo * 0.35);
+    // Lit billows, paler than the dry ground beneath, or they vanish into it. Even a little dust
+    // has to show, so its strength is lifted towards full.
+    float dust = pow(uPolvo, 0.6);
+    vec2 dp = p * 3.2 - wind * uTime * 0.12;
+    float cloud = fbm(dp + 0.8 * vec2(fbm(dp * 0.6 + 5.2), fbm(dp * 0.6 - 2.4)));
+    float billow = smoothstep(0.45, 0.7, cloud);
+    c = mix(c, uDust * (0.9 + 0.6 * cloud), dust * (0.06 + 0.5 * billow));
+    float mote = specks(p, 30.0, vec2(-0.45, 0.05), 1.0, 0.06);
+    c = mix(c, uDust * 1.6, mote * dust * 0.75);
   }
 
   if (uLluvia > 0.0) {
     // A shower darkens and greys the light, then the streaks fall through it.
     float grey = dot(c, vec3(0.2126, 0.7152, 0.0722));
-    c = mix(c, grey * vec3(0.86, 0.93, 1.04), uLluvia * 0.4);
-    c *= 1.0 - uLluvia * 0.2;
-    float density = 0.25 + 0.55 * uLluvia;
+    c = mix(c, grey * vec3(0.86, 0.93, 1.04), uLluvia * 0.22);
+    c *= 1.0 - uLluvia * 0.1;
+    float density = 0.15 + 0.35 * uLluvia;
     float streaks = rainSheet(p, 140.0, 3.4, density, 0.0) * 0.6
       + rainSheet(p, 90.0, 2.4, density, 11.0) * 0.8
       + rainSheet(p, 55.0, 1.6, density * 0.7, 23.0);
-    c += vec3(0.62, 0.68, 0.76) * streaks * uLluvia * 0.22;
+    c += vec3(0.62, 0.68, 0.76) * streaks * uLluvia * 0.12;
   }
 
   outputColor = vec4(c, inputColor.a);
@@ -138,8 +177,8 @@ class MeteorosEffect extends Effect {
         ['uHumo', new THREE.Uniform(0)],
         ['uReverbero', new THREE.Uniform(0)],
         ['uTime', new THREE.Uniform(0)],
-        ['uDust', new THREE.Uniform(srgb('#c4a07a'))],
-        ['uSmoke', new THREE.Uniform(srgb('#8c8681'))],
+        ['uDust', new THREE.Uniform(srgb('#e3c49a'))],
+        ['uSmoke', new THREE.Uniform(srgb('#7c828b'))],
       ]),
     })
   }
@@ -166,26 +205,13 @@ export function Meteoros() {
   const effect = useMemo(() => new MeteorosEffect(), [])
   useEffect(() => () => effect.dispose(), [effect])
 
-  const ground = useMemo(() => ({ nx: hf.nx, nz: hf.nz, step: hf.step, minX: MAP.minX, minZ: MAP.minZ }), [hf])
 
   const time = useRef(0)
   const last = useRef(shared.uClock.value)
 
   useFrame(() => {
     const month = useStore.getState().month
-    const at = manadaAt(raw, hf.rivers, month)
-    const [x, z] = at
-    const ndvi = mensual(ground, hf.verdor, x, z, month) / 250
-    const sitio: Sitio = {
-      lluvia: (m) => {
-        const [mx, mz] = m === month ? at : manadaAt(raw, hf.rivers, m)
-        return mensual(lluvia, lluvia.mm, mx, mz, m) / 10
-      },
-      seco: 1 - smoothstep(NDVI_DRY, NDVI_LUSH, ndvi),
-      paso: pasoAt(raw, hf.rivers, month),
-      quema: quemaCerca(ground, hf.quemas, x, z, month, SMOKE_KM),
-    }
-    const now = meteoros(month, sitio, calma.current)
+    const now = meteoros(month, sitioAt(raw, hf, lluvia, month), calma.current)
     const u = effect.uniforms
     u.get('uLluvia')!.value = now.lluvia
     u.get('uNubes')!.value = now.nubes

@@ -124,7 +124,24 @@ test('late in the dry season the Mara still shimmers and raises dust', () => {
 
 test('even a weak Chubasco lays the dust and stops the shimmer', () => {
   const mara = sitio({ lluvia: steady(60), seco: 0.5, paso: 40 })
-  const wet = year(0.002).map((m) => meteoros(m, mara)).filter((w) => w.lluvia > 0.1)
+  const wet = year(0.002).map((m) => meteoros(m, mara)).filter((w) => w.lluvia > 0.4)
   assert.ok(wet.length > 0)
   assert.ok(wet.every((w) => w.polvo === 0 && w.reverbero === 0))
+})
+
+test('the smoke changes smoothly as the Manada walks over patchy Quemas', () => {
+  const big = { nx: 200, nz: 200, step: 0.3, minX: 0, minZ: 0 }
+  let seed = 3
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646
+  const quemas = Array.from({ length: 200 * 200 }, () => (rnd() < 0.3 ? 7 : 0))
+  let prev = quemaCerca(big, quemas, 25, 30, 6.9, 15)
+  for (let x = 25; x < 35; x += 0.05) {
+    const now = quemaCerca(big, quemas, x, 30, 6.9, 15)
+    assert.ok(Math.abs(now - prev) < 0.01, `jumps ${Math.abs(now - prev).toFixed(3)} at ${x.toFixed(2)}`)
+    prev = now
+  }
+})
+
+test('no Polvo on ground that is still green', () => {
+  for (const m of year(0.1)) assert.equal(meteoros(m, sitio({ seco: 0.25, paso: 80 })).polvo, 0)
 })

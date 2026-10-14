@@ -32,7 +32,7 @@ export interface Meteoros {
 }
 
 /**
- * Each slot of the year (months) holds at most one Chubasco. At a year a minute a slot is 2.5 s,
+ * Each slot of the year (months) holds at most one Chubasco. At a year in 100 s a slot is 5 s,
  * so a Chubasco lasts long enough to read.
  */
 const SLOT = 0.5
@@ -53,10 +53,13 @@ const COOL_FULL = 100
 /** The Manada's pace (km a month) from which it raises dust, and at which it raises it all. */
 const PACE_FROM = 5
 const PACE_FULL = 60
+/** How straw the ground must be to give dust at all, and to give all of it. */
+const DUST_FROM = 0.3
+const DUST_FULL = 0.7
 /** Dust that hangs over dry ground with the Manada standing still. */
 const STILL_DUST = 0.35
-/** A Chubasco this strong already lays all the dust: any shower does. */
-const SHOWER_DAMP = 0.1
+/** A Chubasco this strong already lays all the dust; weaker ones fade it out gently as they come. */
+const SHOWER_DAMP = 0.4
 /** Share of ground burning nearby from which there is smoke, and at which it is full. */
 const SMOKE_FROM = 0.02
 const SMOKE_FULL = 0.3
@@ -106,7 +109,7 @@ export function meteoros(month: number, sitio: Sitio, calma = false): Meteoros {
   return {
     lluvia: rain * quiet,
     nubes: Math.min(1, 0.65 * clouds + 0.35 * rain),
-    polvo: sitio.seco * raised * (1 - damp) * quiet,
+    polvo: smoothstep(DUST_FROM, DUST_FULL, sitio.seco) * raised * (1 - damp) * quiet,
     humo: smoothstep(SMOKE_FROM, SMOKE_FULL, sitio.quema) * (1 - rain),
     reverbero: calma ? 0 : smoothstep(SHIMMER_FROM, SHIMMER_FULL, sitio.seco) * (1 - Math.max(shower, smoothstep(COOL_FROM, COOL_FULL, now))),
   }
@@ -147,20 +150,22 @@ function spreadOf(ix: number, iz: number) {
  * its month to cross the patch, each cell flaring up and dying down as the front passes.
  */
 export function quemaCerca(grid: Rejilla, quemas: ArrayLike<number>, x: number, z: number, month: number, radius: number) {
-  const SAMPLES = 24
-  const spacing = (2 * radius) / SAMPLES
+  // Fixed cells of the grid, every `stride`, fading out smoothly towards the rim: as (x, z) moves
+  // the samples don't hop from cell to cell, so the share glides instead of flickering.
+  const stride = Math.max(1, Math.round((2 * radius) / 24 / grid.step))
+  const span = (radius / grid.step) | 0
+  const cx = Math.round((x - grid.minX) / grid.step / stride) * stride
+  const cz = Math.round((z - grid.minZ) / grid.step / stride) * stride
   let burning = 0
   let total = 0
-  for (let j = 0; j <= SAMPLES; j++)
-    for (let i = 0; i <= SAMPLES; i++) {
-      const dx = -radius + i * spacing
-      const dz = -radius + j * spacing
-      const d2 = (dx * dx + dz * dz) / (radius * radius)
-      if (d2 > 1) continue
-      const ix = Math.round((x + dx - grid.minX) / grid.step)
-      const iz = Math.round((z + dz - grid.minZ) / grid.step)
+  for (let iz = cz - span - stride; iz <= cz + span + stride; iz += stride)
+    for (let ix = cx - span - stride; ix <= cx + span + stride; ix += stride) {
       if (ix < 0 || iz < 0 || ix >= grid.nx || iz >= grid.nz) continue
-      const w = Math.exp(-4 * d2)
+      const dx = grid.minX + ix * grid.step - x
+      const dz = grid.minZ + iz * grid.step - z
+      const d2 = (dx * dx + dz * dz) / (radius * radius)
+      if (d2 >= 1) continue
+      const w = (1 - d2) ** 2
       total += w
       const m = quemas[iz * grid.nx + ix]
       if (!m) continue
