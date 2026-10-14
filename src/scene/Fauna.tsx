@@ -1133,13 +1133,35 @@ function RecorridoLine({ bake, hf }: { bake: FaunaBake; hf: Heightfield }) {
   return <Line points={points} vertexColors={colors} lineWidth={2.5} />
 }
 
+const built = new WeakMap<FaunaBake, WeakMap<RiverLine[], Way[]>>()
+
+/** Each species' way through the year, built once and shared with whatever else follows the Manada. */
+function waysOf(raw: FaunaBake, rivers: RiverLine[]) {
+  let byRivers = built.get(raw)
+  if (!byRivers) built.set(raw, (byRivers = new WeakMap()))
+  let ways = byRivers.get(rivers)
+  if (!ways) {
+    ways = ESPECIES.map((e) => rounded({ ...raw, recorrido: e.name === 'gacela' ? raw.gacelas : raw.recorrido }, rivers))
+    byRivers.set(rivers, ways)
+  }
+  return ways
+}
+
+/** Where the centre of the ñus is at a moment of the year. */
+export function manadaAt(raw: FaunaBake, rivers: RiverLine[], month: number) {
+  return recorridoAt(waysOf(raw, rivers)[0], month)
+}
+
+/** How fast the ñus are going at a moment of the year (km a month). */
+export function pasoAt(raw: FaunaBake, rivers: RiverLine[], month: number) {
+  const [vx, vz] = velocityAt(waysOf(raw, rivers)[0], month)
+  return Math.hypot(vx, vz)
+}
+
 export function Fauna() {
   const raw = useFauna()
   const hf = useHeightfield()
-  const ways = useMemo(
-    () => ESPECIES.map((e) => rounded({ ...raw, recorrido: e.name === 'gacela' ? raw.gacelas : raw.recorrido }, hf.rivers)),
-    [raw, hf.rivers],
-  )
+  const ways = useMemo(() => waysOf(raw, hf.rivers), [raw, hf.rivers])
   const all = useMemo(() => drops(), [])
   const [bake] = ways
   const geometry = useMemo(() => new THREE.PlaneGeometry(1, 1, GRID, GRID), [])

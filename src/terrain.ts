@@ -55,6 +55,10 @@ export interface Heightfield {
   cropsDetail: Uint8Array
   /** Per vertex: distance to nearest river (km), lake (0/1). */
   masks: Float32Array
+  /** Verdor per cell, twelve months each, 0–250 for NDVI 0–1. */
+  verdor: Uint8Array
+  /** Usual month of each cell's Quema (1–12, 0 = none). */
+  quemas: Uint8Array
   /** Ground normals at `detail`× the grid's resolution: half-float x, z per cell. */
   normals: Uint16Array
   detail: number
@@ -127,14 +131,16 @@ async function fetchHeightfield(): Promise<Heightfield> {
   shared.uHeight.value = tex
   shared.uMapStep.value = step
   shared.uGrid.value.set(nx, nz)
-  shared.uVerdor.value = verdorTextures(new Uint8Array(rawVerdor), nx, nz)
-  shared.uQuemas.value = quemasTexture(new Uint8Array(rawQuemas), nx, nz)
-  shared.uQuemaMask.value = quemaMaskTexture(new Uint8Array(rawQuemas), nx, nz)
+  const verdor = new Uint8Array(rawVerdor)
+  const quemas = new Uint8Array(rawQuemas)
+  shared.uVerdor.value = verdorTextures(verdor, nx, nz)
+  shared.uQuemas.value = quemasTexture(quemas, nx, nz)
+  shared.uQuemaMask.value = quemaMaskTexture(quemas, nx, nz)
   shared.uRelief.value = reliefTexture(relief, (nx - 1) * meta.detail + 1, (nz - 1) * meta.detail + 1)
 
   const coverDetail = new Uint8Array(rawCoverDetail)
   const cropsDetail = new Uint8Array(rawCropsDetail)
-  const hf = { nx, nz, step, heights, cover, crops, coverDetail, cropsDetail, masks, normals, detail: meta.detail }
+  const hf = { nx, nz, step, heights, cover, crops, coverDetail, cropsDetail, verdor, quemas, masks, normals, detail: meta.detail }
   return {
     ...hf,
     rivers: meta.rivers.flatMap((r) => r.lines.map((points) => ({ name: r.name, kind: r.kind, points }))),

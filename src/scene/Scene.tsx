@@ -5,6 +5,7 @@ import { MONTHS_PER_SECOND, useStore } from '../store'
 import { shared } from '../shaders/common'
 import { Bruma } from './Bruma'
 import { CameraRig } from './CameraRig'
+import { Meteoros } from './Meteoros'
 import { Border, Labels } from './Overlays'
 import { Rivers } from './Rivers'
 import { Sharpen } from './Sharpen'
@@ -46,6 +47,7 @@ export function Scene() {
       <EffectComposer multisampling={dpr >= 1.5 ? 0 : 4}>
         <Sharpen />
         <Bruma />
+        <Meteoros />
         <Bloom intensity={0.55} luminanceThreshold={0.82} mipmapBlur />
         <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
         <Noise opacity={0.035} />
