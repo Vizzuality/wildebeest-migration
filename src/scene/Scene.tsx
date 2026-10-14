@@ -3,7 +3,6 @@ import { Bloom, EffectComposer, Noise, ToneMapping, Vignette } from '@react-thre
 import { ToneMappingMode } from 'postprocessing'
 import { MONTHS_PER_SECOND, useStore } from '../store'
 import { shared } from '../shaders/common'
-import { Bruma } from './Bruma'
 import { CameraRig } from './CameraRig'
 import { Meteoros } from './Meteoros'
 import { Border, Labels } from './Overlays'
@@ -46,7 +45,6 @@ export function Scene() {
       <CameraRig />
       <EffectComposer multisampling={dpr >= 1.5 ? 0 : 4}>
         <Sharpen />
-        <Bruma />
         <Meteoros />
         <Bloom intensity={0.55} luminanceThreshold={0.82} mipmapBlur />
         <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
