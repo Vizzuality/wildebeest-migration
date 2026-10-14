@@ -286,12 +286,13 @@ function drops(): Drop[] {
  * their ways do. The zebras keep the wildebeest's way mixed into its head, about a day (`ahead`,
  * months) in front, cropping the long grass first; the gazelles keep a shorter way of their own.
  * Each is drawn to its share of the head count (millions; area goes with numbers, so size with the square root). Each dot of the
- * mesh is one species, picked by the species' share of the animals there.
+ * mesh is one species, picked by the species' share of the animals there, and as big as that
+ * species' animals are long next to a wildebeest (`size`).
  */
 const ESPECIES = [
-  { name: 'ñu', count: 1.3, ahead: 0, color: [0.24, 0.22, 0.24] },
-  { name: 'cebra', count: 0.2, ahead: 0.025, color: [0.86, 0.84, 0.78] },
-  { name: 'gacela', count: 0.35, ahead: 0, color: [0.72, 0.48, 0.28] },
+  { name: 'ñu', count: 1.3, ahead: 0, size: 1, color: [0.24, 0.22, 0.24] },
+  { name: 'cebra', count: 0.2, ahead: 0.025, size: 1.1, color: [0.86, 0.84, 0.78] },
+  { name: 'gacela', count: 0.35, ahead: 0, size: 0.45, color: [0.72, 0.48, 0.28] },
 ] as const
 const HEAD_COUNT = ESPECIES.reduce((sum, e) => sum + e.count, 0)
 const SLOTS = DROPS * ESPECIES.length
@@ -312,6 +313,7 @@ const uniforms = {
   uColors: { value: ESPECIES.map((e) => new THREE.Vector3(...e.color)) },
   /** Each species' head count (millions). */
   uHeads: { value: ESPECIES.map((e) => e.count) },
+  uDotSizes: { value: new THREE.Vector3(...ESPECIES.map((e) => e.size)) },
   /** How far in each dot of the mesh is, 0 to 1. */
   uGlow: { value: null as THREE.Texture | null },
   /** Where the Manada can be at all (r: the ground the collars reach, off the Lagos) and which bank of the Mara it is (g). */
@@ -347,6 +349,7 @@ uniform vec3 uChain[${SLOTS * CHAIN_POINTS}];
 uniform float uMotion[${SLOTS}];
 uniform vec3 uColors[${ESPECIES.length}];
 uniform float uHeads[${ESPECIES.length}];
+uniform vec3 uDotSizes;
 uniform sampler2D uGround;
 uniform vec3 uGroundSize;
 uniform float uDropBank[${SLOTS}];
@@ -508,8 +511,9 @@ void main() {
       float glow = held.r;
       float back = glow - 1.0;
       float grow = 1.0 + 2.7 * back * back * back + 1.7 * back * back;
-      float lung = dot(held.gba, breaths) / max(held.g + held.b + held.a, 1e-3);
-      grow *= lung;
+      float kinds = max(held.g + held.b + held.a, 1e-3);
+      float lung = dot(held.gba, breaths) / kinds;
+      grow *= lung * dot(held.gba, uDotSizes) / kinds;
       float r = base * grow * (1.0 + (hash12(id + 19.7) - 0.5) * ${(2 * SIZE_SPREAD).toFixed(2)});
       // The bulb that lights this point most: the one whose glass is nearest, in its own radii.
       if (glow > 0.0 && d / max(r, 1e-4) < dist / max(radius, 1e-4)) {
