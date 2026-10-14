@@ -3,16 +3,9 @@ import * as THREE from 'three'
 import { MAP, project } from '../geo'
 import { GLSL_COMMON, shared } from '../shaders/common'
 import { RIVER_GLSL, riverUniforms } from '../shaders/rivers'
+import { CORTE_GLSL, corteOf, landTexture, STRIDE } from '../corte'
 import { mipmapped, useHeightfield, type Heightfield } from '../terrain'
-import { HORIZON } from './Sky'
 
-/**
- * The mesh keeps one vertex in STRIDE each way. At full resolution most triangles were smaller
- * than a pixel, and the GPU shades every triangle in 2×2 blocks, so the ground shader ran several
- * times per pixel. Normals (finer still than the grid), Cobertura, Cultivo and lakes come from textures
- * instead, so the shading keeps every gully.
- */
-const STRIDE = 2
 
 const vertex = /* glsl */ `
 varying vec3 vWorld;
@@ -23,9 +16,10 @@ void main() {
 }
 `
 
-const fragment = /* glsl */ `
+const fragment = (cut: string) => /* glsl */ `
 ${GLSL_COMMON}
 ${RIVER_GLSL}
+${cut}
 uniform vec2 uCrater;
 uniform vec2 uCraterLake;
 uniform sampler2D uNormal;
@@ -48,6 +42,9 @@ float canopy(vec2 xz, float tree, float fw) {
 
 void main() {
   vec2 xz = vWorld.xz;
+#ifdef CUT
+  if (!inCorte(xz)) discard;
+#endif
   vec2 grid = gridUv(xz);
   vec2 fine = detailUv(xz, textureSize(uNormal, 0));
   vec2 sideways = texture2D(uNormal, fine).xy;
@@ -166,25 +163,33 @@ void main() {
 const CRATER = project([35.575, -3.18])
 const CRATER_LAKE = project([35.536, -3.193])
 
-function gridIndex(nx: number, nz: number, stride: number) {
-  const cols = Math.floor((nx - 1) / stride)
-  const rows = Math.floor((nz - 1) / stride)
-  const index = new Uint32Array(cols * rows * 6)
-  let k = 0
-  for (let iz = 0; iz < rows * stride; iz += stride) {
-    for (let ix = 0; ix < cols * stride; ix += stride) {
-      const a = iz * nx + ix
-      const b = a + stride
-      const c = a + stride * nx
-      const d = c + stride
-      index[k++] = a; index[k++] = c; index[k++] = b
-      index[k++] = b; index[k++] = c; index[k++] = d
+/**
+ * Cells on the island, split into those wholly on land and those the coast crosses, which alone
+ * pay for the clip: a shader that can discard loses early depth testing. The land field is
+ * bilinear inside a cell, so a cell whose corners agree can't be crossed.
+ */
+function gridIndex(hf: Heightfield) {
+  const { nx } = hf
+  const { field, gx, gz } = corteOf(hf)
+  const inner: number[] = []
+  const edge: number[] = []
+  for (let j = 0; j < gz - 1; j++) {
+    for (let i = 0; i < gx - 1; i++) {
+      const corners = [field[j * gx + i], field[j * gx + i + 1], field[(j + 1) * gx + i], field[(j + 1) * gx + i + 1]]
+      const land = corners.filter((f) => f > 0).length
+      if (land === 0) continue
+      const a = j * STRIDE * nx + i * STRIDE
+      const b = a + STRIDE
+      const c = a + STRIDE * nx
+      const d = c + STRIDE
+      ;(land === 4 ? inner : edge).push(a, c, b, b, c, d)
     }
   }
-  return index
+  return { inner, edge }
 }
 
-function buildGeometry({ nx, nz, step, heights }: Heightfield) {
+function buildGeometry(hf: Heightfield) {
+  const { nx, nz, step, heights } = hf
   const pos = new Float32Array(nx * nz * 3)
   for (let iz = 0; iz < nz; iz++) {
     for (let ix = 0; ix < nx; ix++) {
@@ -194,11 +199,14 @@ function buildGeometry({ nx, nz, step, heights }: Heightfield) {
       pos[i * 3 + 2] = MAP.minZ + iz * step
     }
   }
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
-  geo.setIndex(new THREE.BufferAttribute(gridIndex(nx, nz, STRIDE), 1))
-  geo.computeBoundingSphere()
-  return geo
+  const position = new THREE.BufferAttribute(pos, 3)
+  return Object.values(gridIndex(hf)).map((index) => {
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', position)
+    geo.setIndex(new THREE.Uint32BufferAttribute(index, 1))
+    geo.computeBoundingSphere()
+    return geo
+  }) as [THREE.BufferGeometry, THREE.BufferGeometry]
 }
 
 /** Half float so lighting does not band on the plains, where normals barely tilt. */
@@ -227,33 +235,33 @@ function cropsTexture({ nx, nz, detail, cropsDetail }: Heightfield) {
 
 export function Terrain() {
   const hf = useHeightfield()
-  const geometry = useMemo(() => buildGeometry(hf), [hf])
-  const material = useMemo(
-    () =>
+  const [inner, edge] = useMemo(() => buildGeometry(hf), [hf])
+  const [material, clipped] = useMemo(() => {
+    const uniforms = {
+      ...shared,
+      ...riverUniforms,
+      uCrater: { value: new THREE.Vector2(...CRATER) },
+      uCraterLake: { value: new THREE.Vector2(...CRATER_LAKE) },
+      uNormal: { value: normalTexture(hf) },
+      uLake: { value: lakeTexture(hf) },
+      uCover: { value: coverTexture(hf) },
+      uCrops: { value: cropsTexture(hf) },
+    }
+    const corte = corteOf(hf)
+    return [
+      new THREE.ShaderMaterial({ vertexShader: vertex, fragmentShader: fragment(''), uniforms }),
       new THREE.ShaderMaterial({
         vertexShader: vertex,
-        fragmentShader: fragment,
-        uniforms: {
-          ...shared,
-          ...riverUniforms,
-          uCrater: { value: new THREE.Vector2(...CRATER) },
-          uCraterLake: { value: new THREE.Vector2(...CRATER_LAKE) },
-          uNormal: { value: normalTexture(hf) },
-          uLake: { value: lakeTexture(hf) },
-          uCover: { value: coverTexture(hf) },
-          uCrops: { value: cropsTexture(hf) },
-        },
+        fragmentShader: fragment(CORTE_GLSL),
+        defines: { CUT: '' },
+        uniforms: { ...uniforms, uLand: { value: landTexture(corte) } },
       }),
-    [hf],
-  )
+    ]
+  }, [hf])
   return (
     <>
-      <mesh geometry={geometry} material={material} />
-      {/* Endless ground under the haze so the map never ends in a cliff. */}
-      <mesh rotation-x={-Math.PI / 2} position-y={-3}>
-        <planeGeometry args={[4000, 4000]} />
-        <meshBasicMaterial color={HORIZON} />
-      </mesh>
+      <mesh geometry={inner} material={material} />
+      <mesh geometry={edge} material={clipped} />
     </>
   )
 }

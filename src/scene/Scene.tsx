@@ -4,6 +4,7 @@ import { ToneMappingMode } from 'postprocessing'
 import { MONTHS_PER_SECOND, useStore } from '../store'
 import { shared } from '../shaders/common'
 import { CameraRig } from './CameraRig'
+import { Corte } from './Corte'
 import { Meteoros } from './Meteoros'
 import { Border, Labels } from './Overlays'
 import { Rivers } from './Rivers'
@@ -37,6 +38,7 @@ export function Scene() {
       <directionalLight position={[-62, 55, 56]} intensity={2.4} color="#ffdcae" />
       <Sky />
       <Terrain />
+      <Corte />
       <Rivers />
       <Groves />
       <Fauna />

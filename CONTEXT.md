@@ -10,6 +10,10 @@ Visualización 3D del ciclo anual de la migración de ñus en el ecosistema Sere
 El rectángulo geográfico que se representa, de lon 33,27 a 35,98 y de lat −0,67 a −3,67, con margen para que ningún lugar de la historia quede en la Bruma, medido en kilómetros desde el origen (34,85, −2,3).
 _Avoid_: mundo, escena, bbox
 
+**Corte**:
+El trozo del Mapa que se ve, recortado como una isla y levantado como una maqueta de museo: una costa con bahías, cabos e islotes, nunca el rectángulo, que deja dentro cada lugar con nombre y atraviesa el agua del Lago Victoria y del Eyasi. Sus paredes muestran los estratos bajo el Relieve y el agua de los Lagos que cortan, y descansa sobre una mesa de arena que se pierde en el horizonte.
+_Avoid_: borde, recorte, bbox
+
 **DEM**:
 Modelo digital de elevación real (metros sobre el nivel del mar) del que se obtiene el relieve del Mapa.
 _Avoid_: tiles, elevation data
