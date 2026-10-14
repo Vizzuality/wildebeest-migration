@@ -88,6 +88,22 @@ _Avoid_: árbol, tree, instancia
 Masa de calima cálida y volumétrica que envuelve el Mapa en un óvalo irregular, con lenguas que entran desde el borde. Solo existe hacia los bordes: el terreno del interior se ve limpio, sin velo. Se encharca en lo bajo, se retira en las tierras altas (el Relieve la recorta) y deja siempre despejado cada lugar con nombre.
 _Avoid_: niebla de guerra, fog, fog of war, fade del borde
 
+**Meteoro**:
+Lo que el que mira vive del momento del año sin que cambie el Mapa: lluvia, sombras de nubes, polvo, humo y Reverbero. Cubre toda la imagen por igual, como si estuviera entre el ojo y el Mapa, y su fuerza la marca el tiempo que hace allí donde está la Manada. Acompaña, nunca tapa: la Mancha y las etiquetas se leen siempre. El humo solo sale cuando arde una Quema cerca de la Manada. No es la Bruma, que es del Mapa.
+_Avoid_: clima, weather, efecto, overlay, partículas
+
+**Chubasco**:
+Un aguacero que llega y se va. La lluvia de cada Meteoro cae siempre a Chubascos, nunca seguida: la lluvia media medida de cada mes donde está la Manada decide cada cuánto llegan y cuánto duran. Las sombras de nubes llegan antes que los Chubascos de la estación y se quedan después.
+_Avoid_: lluvia continua, tormenta, shower
+
+**Polvo**:
+El que levanta la Manada sobre el suelo seco. Lo seco lo da el Verdor donde está la Manada, y el paso de la Manada lo sube, sobre todo en una Avalancha. Con lluvia no hay Polvo.
+_Avoid_: calima, arena, dust
+
+**Reverbero**:
+El temblor sutil de la imagen por el aire caliente sobre el suelo seco, cuando el Verdor donde está la Manada es pajizo, al final de la estación seca. Es un Meteoro, no una calima.
+_Avoid_: calima de calor, heat haze, shimmer, espejismo
+
 ### Fauna
 
 **Manada**:
