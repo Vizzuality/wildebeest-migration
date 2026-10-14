@@ -1,15 +1,13 @@
 import { Line } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { useCallback, useEffect, useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import * as THREE from 'three'
 import { useFauna, type FaunaBake } from '../fauna'
-import { CAUDAL } from '../geo'
+import { CAUDAL, MAP } from '../geo'
 import { stageAt } from '../shaders/rivers'
 import { GLSL_COMMON, shared } from '../shaders/common'
 import { mulberry32, useHeightfield, type Heightfield, type RiverLine } from '../terrain'
 import { useStore } from '../store'
-import { Bajas, type Avalancha } from './Bajas'
-import { Partos, type OnMancha } from './Partos'
 
 // The Manada as a liquid poured along the Recorrido. It is a chain of drops, each running a
 // little ahead of or behind the calendar, merged into one smooth surface like metaballs. On the
@@ -33,24 +31,73 @@ const DROP_SIZE = 1.65
  */
 const SIZE_REF_KM = 13
 const SIZE_POWER = 0.3
-/** The field at the body's edge, and how far either side of it the dots fade out. */
+/** The field at the body's edge. */
 const EDGE = 0.9
-const EDGE_SOFT = 0.3
+/**
+ * Each dot turns on at its own field, up to STAGGER either side of EDGE, so the edge sweeping
+ * across the mesh lights the dots one by one instead of a whole row at once.
+ */
+const STAGGER = 0.35
+/**
+ * How far into the body a dot is all the way in: it grows from nothing, overshoots a little and
+ * settles, fading in as it grows, so it swells up rather than switching on.
+ */
+const DOT_GROW = 0.5
+/**
+ * How far in each dot is, and its species, are worked out afresh every frame from the moment of
+ * the year alone, so scrubbing the Timeline lands on the same dots as playing up to it. They are
+ * kept in a texel of a GLOW_CELLS-wide map that wraps round the mesh, wider than any Mancha.
+ */
+const GLOW_CELLS = 512
+/** The Mancha's wobble and lobes come round this many times a year, so they close the year too. */
+const WOBBLES_PER_YEAR = 2
+/**
+ * The mesh breathes as the Manada moves: along a stream the dots are smallest at its head and its
+ * tail, BREATH_LOW of their size, and swell towards its middle, so each patch of ground swells as
+ * the middle of the stream goes over and sinks again as the tail does. Pooled, it doesn't.
+ */
+const BREATH_LOW = 0.45
+/**
+ * Each dot glows: towards its middle its colour climbs to SHINE in brightness, over the Bloom's
+ * threshold, whichever species it is. Along a stream it burns SHINE_BREATH less at the head and the
+ * tail.
+ */
+const SHINE = 3
+const SHINE_BREATH = 0.5
+/** The most a dot's middle burns over its own colour. */
+const GLARE_MAX = 2.6
 /** The field over which the Apiñamiento goes from none to full. */
 const CROWD_FROM = 2
 const CROWD_FULL = 9
 /**
  * The Mancha is drawn as a mesh of dots pinned to the Relieve: the dots never move, the Manada
  * shows them as it passes. MESH_KM apart along the map's axes, DOT_KM across where the Manada is
- * loosest and DOT_CROWDED_KM where it packs tightest, a deep red, hsl(9 97% 34%), that darkens
- * as it packs. Once the dots are closer than about a pixel they blur into their mean, so far off
+ * loosest and DOT_CROWDED_KM where it packs tightest, each in its species' colour, darkening as
+ * it packs. Once the dots are closer than about a pixel they blur into their mean, so far off
  * the mesh reads as an even tint instead of shimmering.
  */
 const MESH_KM = 0.7
 const DOT_KM = 0.21
 const DOT_CROWDED_KM = 0.28
-/** A dark ring round each dot, so it stands out from the ground. */
-const RING_KM = 0.085
+/**
+ * Each dot is a bulb: the glass in its species' colour, burning brighter towards its middle, and
+ * a halo of that colour spilling HALO times as far onto the ground, HALO_ALPHA strong at the glass.
+ */
+/** How far a dot's colour pales towards white: its glass, and where it burns over the Bloom. */
+const WARM = 0.03
+const HOT = 0.08
+const HALO = 1.8
+const HALO_ALPHA = 0.35
+/**
+ * Blurred into their mean far off, the dots cover too little of the ground to read at map scale,
+ * so the mean is drawn FAR_BOOST times as thick.
+ */
+const FAR_BOOST = 2
+/**
+ * The Manada gives off light of its own: an aura in its species' colours over the whole body,
+ * AURA strong where it is thickest, added to the ground under it rather than laid over it.
+ */
+const AURA = 1.6
 /**
  * A perfectly regular mesh in motion makes waves the eye invents, and moiré against the pixels.
  * Each dot is nudged off its place by up to JITTER of the spacing and drawn up to SIZE_SPREAD
@@ -244,19 +291,47 @@ function drops(): Drop[] {
   })
 }
 
+/**
+ * One Mancha per species, all in one field, so they run together where they meet and part where
+ * their ways do. The zebras keep the wildebeest's way mixed into its head, about a day (`ahead`,
+ * months) in front, cropping the long grass first; the gazelles keep a shorter way of their own.
+ * Each is drawn to its share of the head count (millions; area goes with numbers, so size with the square root). Each dot of the
+ * mesh is one species, picked by the species' share of the animals there, and as big as that
+ * species' animals are long next to a wildebeest (`size`).
+ */
+const ESPECIES = [
+  { name: 'ñu', count: 1.3, ahead: 0, size: 1, color: [0.36, 0.44, 0.62] },
+  { name: 'cebra', count: 0.2, ahead: 0.025, size: 1.1, color: [0.86, 0.84, 0.78] },
+  { name: 'gacela', count: 0.35, ahead: 0, size: 0.45, color: [1.0, 0.8, 0.52] },
+] as const
+const HEAD_COUNT = ESPECIES.reduce((sum, e) => sum + e.count, 0)
+const SLOTS = DROPS * ESPECIES.length
+
 const uniforms = {
-  /** Each drop: x, z, radius (km) and the ground height under it. */
-  uDrops: { value: Array.from({ length: DROPS }, () => new THREE.Vector4()) },
+  /** Each drop of every species: x, z, radius (km) and the ground height under it. */
+  uDrops: { value: Array.from({ length: SLOTS }, () => new THREE.Vector4()) },
   /** Each drop's heading and its radius along it: on the move drops stretch into a stream. */
-  uAxes: { value: Array.from({ length: DROPS }, () => new THREE.Vector3(1, 0, 1)) },
+  uAxes: { value: Array.from({ length: SLOTS }, () => new THREE.Vector3(1, 0, 1)) },
   /** Each drop's point on the Recorrido itself (x, z) and radius, in order along the stream. */
-  uSpine: { value: Array.from({ length: DROPS }, () => new THREE.Vector3()) },
+  uSpine: { value: Array.from({ length: SLOTS }, () => new THREE.Vector3()) },
   /** Each drop's stretch of the way, head to tail: x, z and half-width (km). */
-  uChain: { value: Array.from({ length: DROPS * CHAIN_POINTS }, () => new THREE.Vector3()) },
+  uChain: { value: Array.from({ length: SLOTS * CHAIN_POINTS }, () => new THREE.Vector3()) },
   uOrigin: { value: new THREE.Vector2() },
   uSize: { value: 1 },
-  /** How much the Manada is on the move (0 pooled, 1 streaming). */
-  uMotion: { value: 0 },
+  /** How much each drop is on the move (0 pooled, 1 streaming). */
+  uMotion: { value: Array.from({ length: SLOTS }, () => 0) },
+  uColors: { value: ESPECIES.map((e) => new THREE.Vector3(...e.color)) },
+  /** Each species' head count (millions). */
+  uHeads: { value: ESPECIES.map((e) => e.count) },
+  uDotSizes: { value: new THREE.Vector3(...ESPECIES.map((e) => e.size)) },
+  /** How far in each dot of the mesh is, 0 to 1. */
+  uGlow: { value: null as THREE.Texture | null },
+  /** Where the Manada can be at all (r: the ground the collars reach, off the Lagos) and which bank of the Mara it is (g). */
+  uGround: { value: null as THREE.Texture | null },
+  uGroundSize: { value: new THREE.Vector3() },
+  /** Which bank of the Mara each drop is on, and each point of its stretch of the way. */
+  uDropBank: { value: Array.from({ length: SLOTS }, () => 0) },
+  uChainBank: { value: Array.from({ length: SLOTS * CHAIN_POINTS }, () => 0) },
 }
 
 const vertex = /* glsl */ `
@@ -275,15 +350,22 @@ void main() {
 }
 `
 
-const fragment = /* glsl */ `
+const FIELD = /* glsl */ `
 ${GLSL_COMMON}
-uniform vec4 uDrops[${DROPS}];
-uniform vec3 uAxes[${DROPS}];
-uniform vec3 uSpine[${DROPS}];
-uniform vec3 uChain[${DROPS * CHAIN_POINTS}];
-uniform float uMotion;
-varying vec2 vWorld;
-varying float vHeight;
+uniform vec4 uDrops[${SLOTS}];
+uniform vec3 uAxes[${SLOTS}];
+uniform vec3 uSpine[${SLOTS}];
+uniform vec3 uChain[${SLOTS * CHAIN_POINTS}];
+uniform float uMotion[${SLOTS}];
+uniform vec3 uColors[${ESPECIES.length}];
+uniform float uHeads[${ESPECIES.length}];
+uniform vec3 uDotSizes;
+uniform sampler2D uGround;
+uniform vec3 uGroundSize;
+uniform float uDropBank[${SLOTS}];
+uniform float uChainBank[${SLOTS * CHAIN_POINTS}];
+
+vec2 groundAt(vec2 world) { return texture2D(uGround, ((world - uMapMin) / uGroundSize.z + 0.5) / uGroundSize.xy).rg; }
 
 // A thread of liquid from a to b. At its centre line it always reaches 1, above the surface.
 float thread(vec2 p, vec3 a, vec3 b, float r) {
@@ -305,15 +387,38 @@ float tube(vec2 p, vec2 a, vec2 b, float ra, float rb) {
   return dot(d, d) / r2;
 }
 
-void main() {
-  float warp = mix(${WARP_KM.toFixed(2)}, ${WARP_MOVING_KM.toFixed(2)}, uMotion);
-  vec2 lobes = vWorld * ${WARP_SCALE.toFixed(2)};
-  vec2 p = vWorld + warp * vec2(
-    tnoise(lobes + vec2(uClock * 0.03, 3.1)) * 0.7 + tnoise(lobes * 2.3 - vec2(5.7, uClock * 0.05)) * 0.3,
-    tnoise(lobes + vec2(11.3, -uClock * 0.03)) * 0.7 + tnoise(lobes * 2.3 + vec2(uClock * 0.05, 8.9)) * 0.3
+// How much of the Manada there is at world, and how much of it each species brings.
+// lungs gathers how full each species' body there is, weighted: pooled it is full, along a stream
+// it runs from 0 at either end to 1 in the middle. x is the weighted fullness, y the weight.
+float fieldAt(vec2 world, inout float own[${ESPECIES.length}], inout vec2 lungs[${ESPECIES.length}]) {
+  // How much the liquid here is on the move, from the drops nearby.
+  float moving = 0.0;
+  float nearby = 1e-6;
+  for (int i = 0; i < ${SLOTS}; i++) {
+    vec2 d = world - uDrops[i].xy;
+    float reach = max(uAxes[i].z, uDrops[i].z) * 3.0;
+    float w = exp(-dot(d, d) / (reach * reach));
+    moving += uMotion[i] * w;
+    nearby += w;
+  }
+  moving /= nearby;
+  float warp = mix(${WARP_KM.toFixed(2)}, ${WARP_MOVING_KM.toFixed(2)}, moving);
+  vec2 lobes = world * ${WARP_SCALE.toFixed(2)};
+  // The lobes drift with the calendar, round a loop that closes at the end of the year.
+  float turn = uMonth * ${((2 * Math.PI) / 12).toFixed(5)};
+  vec2 slow = 0.29 * vec2(cos(turn), sin(turn));
+  vec2 fast = 0.48 * vec2(cos(turn), sin(turn));
+  vec2 p = world + warp * vec2(
+    tnoise(lobes + vec2(slow.x, 3.1 + slow.y)) * 0.7 + tnoise(lobes * 2.3 - vec2(5.7 + fast.y, fast.x)) * 0.3,
+    tnoise(lobes + vec2(11.3 + slow.y, -slow.x)) * 0.7 + tnoise(lobes * 2.3 + vec2(fast.x, 8.9 + fast.y)) * 0.3
   );
+  // The Mara cuts the Manada: a drop lights only its own bank of it, and a stretch of the way only
+  // the banks its ends are on, so it spills across only where it crosses. Taken on the ground, not
+  // the warped body, so the cut runs along the river itself.
+  vec2 ground = groundAt(world);
   float field = 0.0;
-  for (int i = 0; i < ${DROPS}; i++) {
+  for (int i = 0; i < ${SLOTS}; i++) {
+    if (abs(ground.g - uDropBank[i]) > 0.5) continue;
     vec2 d = p - uDrops[i].xy;
     vec2 t = uAxes[i].xy;
     vec2 n = vec2(-t.y, t.x);
@@ -324,33 +429,76 @@ void main() {
     float spread = a * a / ra2 + b * b / r2;
     if (spread > 6.0) continue;
     // Only pooled: on the move the stretch of the way is the whole body.
-    field += exp(-spread) * (1.0 - uMotion);
+    float w = exp(-spread) * (1.0 - uMotion[i]);
+    field += w;
+    own[i / ${DROPS}] += w;
+    lungs[i / ${DROPS}] += vec2(w);
   }
   // Spine along the Recorrido, and each drop's stretch of the way as one tube round the nearest
   // of its points, so it bends smoothly with the way instead of beading where the points meet.
-  for (int i = 0; i < ${DROPS}; i++) {
+  for (int i = 0; i < ${SLOTS}; i++) {
     float best = 1e9;
+    float along = 0.0;
     for (int k = 0; k + 1 < ${CHAIN_POINTS}; k++) {
+      if (min(abs(ground.g - uChainBank[i * ${CHAIN_POINTS} + k]), abs(ground.g - uChainBank[i * ${CHAIN_POINTS} + k + 1])) > 0.5) continue;
       vec3 a = uChain[i * ${CHAIN_POINTS} + k];
       vec3 b = uChain[i * ${CHAIN_POINTS} + k + 1];
-      best = min(best, tube(p, a.xy, b.xy, a.z, b.z));
+      float d = tube(p, a.xy, b.xy, a.z, b.z);
+      if (d < best) {
+        best = d;
+        vec2 ab = b.xy - a.xy;
+        along = (float(k) + clamp(dot(p - a.xy, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0)) / ${(CHAIN_POINTS - 1).toFixed(1)};
+      }
     }
+    float w = 0.0;
     if (best < 6.0) {
-      field += exp(-best) * mix(1.0, ${STREAM_DEPTH.toFixed(2)}, uMotion);
+      w += exp(-best) * mix(1.0, ${STREAM_DEPTH.toFixed(2)}, uMotion[i]);
+      lungs[i / ${DROPS}] += vec2(w * mix(1.0, sin(3.14159 * along), uMotion[i]), w);
     }
-    if (i + 1 < ${DROPS}) {
-      field += thread(p, uSpine[i], uSpine[i + 1], min(uSpine[i].z, uSpine[i + 1].z) * 0.55);
+    // Threaded only within a species: two Manchas join where they touch, not along a spine.
+    if ((i + 1) % ${DROPS} != 0) {
+      w += thread(p, uSpine[i], uSpine[i + 1], min(uSpine[i].z, uSpine[i + 1].z) * 0.55);
     }
+    field += w;
+    own[i / ${DROPS}] += w;
   }
-  float lush = greenOf(verdor(vWorld, 0.5));
-  vec2 slope = vec2(heightAt(vWorld + vec2(1.5, 0.0)) - heightAt(vWorld - vec2(1.5, 0.0)), heightAt(vWorld + vec2(0.0, 1.5)) - heightAt(vWorld - vec2(0.0, 1.5))) / 3.0;
+  float lush = greenOf(verdor(world, 0.5));
+  vec2 slope = vec2(heightAt(world + vec2(1.5, 0.0)) - heightAt(world - vec2(1.5, 0.0)), heightAt(world + vec2(0.0, 1.5)) - heightAt(world - vec2(0.0, 1.5))) / 3.0;
   float steep = smoothstep(0.04, 0.2, length(slope));
   float land = mix(${LAND_POOR.toFixed(2)}, ${LAND_RICH.toFixed(2)}, lush * (1.0 - steep));
   field = pow(max(field, 1e-6), 1.0 / land);
+  // Pinned to the ground rather than the warped body: where the collars never go, no dot lights.
+  field *= ground.r;
+  return field;
+}
+`
 
-  // The dots fade and shrink out towards the rim, so it keeps its lobes without stair-stepping.
-  float rim = smoothstep(${(EDGE - EDGE_SOFT).toFixed(2)}, ${(EDGE + EDGE_SOFT).toFixed(2)}, field);
-  if (rim < 0.005) discard;
+const fragment = /* glsl */ `
+${FIELD}
+uniform sampler2D uGlow;
+varying vec2 vWorld;
+varying float vHeight;
+
+void main() {
+  // Most of the quad has no dot in; skip the field there.
+  vec2 cell = vWorld / ${MESH_KM.toFixed(2)};
+  float alive = 0.0;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      alive = max(alive, texture2D(uGlow, (mod(floor(cell) + vec2(float(i), float(j)), ${GLOW_CELLS}.0) + 0.5) / ${GLOW_CELLS}.0).r);
+    }
+  }
+  if (alive <= 0.0) discard;
+  float own[${ESPECIES.length}];
+  for (int s = 0; s < ${ESPECIES.length}; s++) own[s] = 0.0;
+  vec2 lungs[${ESPECIES.length}];
+  for (int s = 0; s < ${ESPECIES.length}; s++) lungs[s] = vec2(0.0);
+  float field = fieldAt(vWorld, own, lungs);
+  // Each species breathes on its own, so a stream running over another species' pool leaves its
+  // dots be: 1 where it is pooled or mid-stream, BREATH_LOW at a stream's ends.
+  vec3 breaths;
+  for (int s = 0; s < ${ESPECIES.length}; s++) breaths[s] = mix(${BREATH_LOW.toFixed(2)}, 1.0, lungs[s].x / max(lungs[s].y, 1e-3));
+
   // Apiñamiento: the more drops pile up on a point, the more packed the Manada is there.
   float crowd = smoothstep(${CROWD_FROM.toFixed(1)}, ${CROWD_FULL.toFixed(1)}, field);
   // It packs round its middle, pooled or on the move.
@@ -358,41 +506,177 @@ void main() {
 
   // The nearest dot of the mesh, on the ground itself rather than the warped body. A nudged dot
   // can reach into the next cell, so the cells around are looked at too.
-  vec2 cell = vWorld / ${MESH_KM.toFixed(2)};
-  float base = mix(${DOT_KM.toFixed(2)}, ${DOT_CROWDED_KM.toFixed(2)}, crowd) * mix(0.4, 1.0, rim);
-  float edging = ${RING_KM.toFixed(3)} * mix(0.4, 1.0, rim);
+  float base = mix(${DOT_KM.toFixed(2)}, ${DOT_CROWDED_KM.toFixed(2)}, crowd);
   float dist = 1e9;
-  float radius = base;
-  float ring = base + edging;
+  float radius = 0.0;
+  float glowing = 0.0;
+  vec3 kind = vec3(1.0, 0.0, 0.0);
+  float breath = 1.0;
   for (int j = -1; j <= 1; j++) {
     for (int i = -1; i <= 1; i++) {
       vec2 id = floor(cell) + vec2(float(i), float(j));
       vec2 nudge = (vec2(hash12(id), hash12(id + 71.3)) - 0.5) * ${(2 * JITTER).toFixed(2)};
       float d = length(cell - id - 0.5 - nudge) * ${MESH_KM.toFixed(2)};
-      float r = base * (1.0 + (hash12(id + 19.7) - 0.5) * ${(2 * SIZE_SPREAD).toFixed(2)});
-      if (d - r - edging < dist - ring) {
+      vec4 held = texture2D(uGlow, (mod(id, ${GLOW_CELLS}.0) + 0.5) / ${GLOW_CELLS}.0);
+      float glow = held.r;
+      float back = glow - 1.0;
+      float grow = 1.0 + 2.7 * back * back * back + 1.7 * back * back;
+      float kinds = max(held.g + held.b + held.a, 1e-3);
+      float lung = dot(held.gba, breaths) / kinds;
+      grow *= lung * dot(held.gba, uDotSizes) / kinds;
+      float r = base * grow * (1.0 + (hash12(id + 19.7) - 0.5) * ${(2 * SIZE_SPREAD).toFixed(2)});
+      // The bulb that lights this point most: the one whose glass is nearest, in its own radii.
+      if (glow > 0.0 && d / max(r, 1e-4) < dist / max(radius, 1e-4)) {
         dist = d;
         radius = r;
-        ring = r + edging;
+        glowing = smoothstep(0.0, 1.0, glow);
+        kind = held.gba;
+        breath = lung;
       }
     }
   }
   float aa = length(fwidth(vWorld)) * 0.7;
-  float core = 1.0 - smoothstep(radius - aa, radius + aa, dist);
-  float shine = 1.0 - smoothstep(ring - aa, ring + aa, dist);
-  // How much of a cell the dot covers, for where the cells are too small to tell apart.
-  float mean = 3.14159 * ring * ring / ${(MESH_KM * MESH_KM).toFixed(4)};
+  float glass = 1.0 - smoothstep(radius - aa, radius + aa, dist);
+  float spill = dist / max(radius * ${HALO.toFixed(1)}, 1e-4);
+  float halo = ${HALO_ALPHA.toFixed(2)} * exp(-4.0 * spill * spill);
+  // How much of a cell the bulb lights, for where the cells are too small to tell apart.
+  float mean = 3.14159 * radius * radius * (1.0 + ${(HALO_ALPHA * HALO * HALO * 0.25).toFixed(3)}) * ${FAR_BOOST.toFixed(1)} / ${(MESH_KM * MESH_KM).toFixed(4)};
   float blur = smoothstep(0.5, 0.9, length(fwidth(cell)));
-  float alpha = mix(shine, mean, blur) * rim;
-  if (alpha < 0.005) discard;
-  // Blurred, the ring's share of the dot tints it darker.
-  float red = mix(core / max(shine, 1e-3), radius * radius / (ring * ring), blur);
-  vec3 lit = srgb(mix(vec3(0.07, 0.04, 0.03), vec3(0.67, 0.109, 0.01) * mix(1.0, 0.75, crowd), clamp(red, 0.0, 1.0)));
-  gl_FragColor = vec4(lit, alpha * 0.8);
+  float alpha = min(mix(max(glass, halo), mean, blur), 1.0) * glowing;
+  // No bulb lights a rock face: a dot's edge or halo over the dark shadow under a cliff reads as a
+  // red streak.
+  vec2 slope = vec2(heightAt(vWorld + vec2(0.3, 0.0)) - heightAt(vWorld - vec2(0.3, 0.0)), heightAt(vWorld + vec2(0.0, 0.3)) - heightAt(vWorld - vec2(0.0, 0.3))) / 0.6;
+  float rock = 1.0 - smoothstep(0.15, 0.35, length(slope));
+  alpha *= rock;
+  float body = ${AURA.toFixed(2)} * smoothstep(${(EDGE - DOT_GROW - 0.3).toFixed(2)}, ${(EDGE + 2).toFixed(2)}, field) * rock;
+  if (alpha < 0.005 && body < 0.005) discard;
+  vec3 colour = (uColors[0] * kind.x + uColors[1] * kind.y + uColors[2] * kind.z) / max(kind.x + kind.y + kind.z, 1e-3);
+  vec3 tint = srgb(colour * mix(1.0, 0.75, crowd));
+  // Towards the middle the glass burns up to SHINE.
+  float middle = 1.0 - smoothstep(0.0, radius, dist);
+  float burn = ${SHINE.toFixed(2)} * (1.0 - ${SHINE_BREATH.toFixed(2)} * (1.0 - breath) / ${(1 - BREATH_LOW).toFixed(2)});
+  float bright = max(dot(tint, vec3(0.2126, 0.7152, 0.0722)), 0.02);
+  // Capped, so a dark colour like the ñu's violet doesn't burn out to white at its middle.
+  float glare = clamp(burn / bright, 1.0, ${GLARE_MAX.toFixed(1)});
+  // Lit up, a colour pales towards white, as bright, and the more the hotter it burns.
+  vec3 pale = vec3(bright);
+  vec3 flame = mix(tint, pale, ${WARM.toFixed(2)});
+  // The halo is the bulb's light on the ground, as bright as the glass's edge, so the glass has no
+  // rim: it only burns brighter from there towards its middle.
+  vec3 glow = flame * clamp(burn * 0.5 / bright, 1.0, glare);
+  vec3 lit = mix(glow, mix(tint, pale, ${HOT.toFixed(2)}) * glare, middle * middle);
+  lit = mix(lit, glow, 1.0 - glass);
+  // Blurred, the bulb's light averaged over it: on the whole the glass burns a sixth of the way to
+  // its glare.
+  vec3 average = mix(glow, mix(tint, pale, ${HOT.toFixed(2)}) * glare, 1.0 / 6.0);
+  lit = mix(lit, average, blur);
+  float heads = 1e-6;
+  vec3 aura = vec3(0.0);
+  for (int s = 0; s < ${ESPECIES.length}; s++) {
+    aura += uColors[s] * own[s] * uHeads[s];
+    heads += own[s] * uHeads[s];
+  }
+  // Premultiplied, so the aura adds light where the dots leave the ground showing.
+  gl_FragColor = vec4(lit * alpha + srgb(aura / heads) * body, alpha);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }
 `
+
+/**
+ * How far in each dot is, from its field now. Each dot comes in at its own field, up to STAGGER
+ * either side of the edge, so the edge lights the dots one by one rather than a row at once.
+ */
+const stepVertex = /* glsl */ `
+void main() {
+  gl_Position = vec4(position.xy, 0.0, 1.0);
+}
+`
+
+const stepFragment = /* glsl */ `
+${FIELD}
+uniform vec2 uCentre;
+uniform vec2 uOrigin;
+uniform float uSize;
+void main() {
+  vec2 texel = floor(gl_FragCoord.xy);
+  // The dot this texel holds is the one nearest the Manchas' middle.
+  vec2 id = texel + ${GLOW_CELLS}.0 * floor((uCentre - texel) / ${GLOW_CELLS}.0 + 0.5);
+  vec2 nudge = (vec2(hash12(id), hash12(id + 71.3)) - 0.5) * ${(2 * JITTER).toFixed(2)};
+  vec2 at = (id + 0.5 + nudge) * ${MESH_KM.toFixed(2)};
+  // Off the quad there is no Manada.
+  vec2 inside = (at - uOrigin) / uSize;
+  if (min(inside.x, inside.y) < 0.0 || max(inside.x, inside.y) > 1.0) {
+    gl_FragColor = vec4(0.0);
+    return;
+  }
+  float own[${ESPECIES.length}];
+  for (int s = 0; s < ${ESPECIES.length}; s++) own[s] = 0.0;
+  vec2 lungs[${ESPECIES.length}];
+  for (int s = 0; s < ${ESPECIES.length}; s++) lungs[s] = vec2(0.0);
+  float field = fieldAt(at, own, lungs);
+  float on = (hash12(id + 5.3) - 0.5) * ${(2 * STAGGER).toFixed(2)};
+  float due = clamp((field - ${(EDGE - DOT_GROW).toFixed(2)} - on) / ${(2 * DOT_GROW).toFixed(2)}, 0.0, 1.0);
+  // Its species, drawn by each one's share of the animals there; blended across a short band of
+  // shares so it doesn't flicker between two where they're even. Every Mancha is as thick at its
+  // middle whatever its numbers (it is their area that goes with them), so where they overlap
+  // each one's field counts for its head count.
+  for (int s = 0; s < ${ESPECIES.length}; s++) own[s] *= uHeads[s];
+  float owned = 1e-6;
+  for (int s = 0; s < ${ESPECIES.length}; s++) owned += own[s];
+  float pick = hash12(id + 43.1);
+  float kind[${ESPECIES.length}];
+  float from = 0.0;
+  for (int s = 0; s < ${ESPECIES.length}; s++) {
+    float to = from + own[s] / owned;
+    float lo = s == 0 ? -1.0 : from;
+    float hi = s == ${ESPECIES.length - 1} ? 2.0 : to;
+    kind[s] = smoothstep(lo - 0.08, lo + 0.08, pick) - smoothstep(hi - 0.08, hi + 0.08, pick);
+    from = to;
+  }
+  // The texel has room for three species, after how far in the dot is.
+  gl_FragColor = vec4(due, kind[0], kind[1], kind[2]);
+}
+`
+
+/** The map of how far in each dot is, redrawn once a frame. */
+class Glow {
+  private readonly target = new THREE.WebGLRenderTarget(GLOW_CELLS, GLOW_CELLS, {
+    type: THREE.HalfFloatType,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+    depthBuffer: false,
+  })
+  private readonly material = new THREE.ShaderMaterial({
+    vertexShader: stepVertex,
+    fragmentShader: stepFragment,
+    uniforms: {
+      ...shared,
+      ...uniforms,
+      uCentre: { value: new THREE.Vector2() },
+    },
+  })
+  private readonly quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.material)
+  private readonly camera = new THREE.OrthographicCamera()
+
+  get texture() {
+    return this.target.texture
+  }
+
+  draw(gl: THREE.WebGLRenderer) {
+    this.material.uniforms.uCentre.value.copy(uniforms.uOrigin.value).addScalar(uniforms.uSize.value / 2).divideScalar(MESH_KM)
+    const previous = gl.getRenderTarget()
+    gl.setRenderTarget(this.target)
+    gl.render(this.quad, this.camera)
+    gl.setRenderTarget(previous)
+  }
+
+  dispose() {
+    this.target.dispose()
+    this.material.dispose()
+    this.quad.geometry.dispose()
+  }
+}
 
 /**
  * The Recorrido as the Manada follows it and, at each sample, how open it is (1 away from the
@@ -677,7 +961,7 @@ function velocityAt(bake: FaunaBake, t: number): [number, number] {
  * Where a drop is at moment `t` of the year, and the shape of the Manada there. A trail passes
  * its drop's `open` so it funnels with the drop instead of fanning out behind it.
  */
-function spot(bake: Way, drop: Drop, t: number, clock: number, open = neckAt(bake, t)) {
+function spot(bake: Way, drop: Drop, t: number, calendar: number, open = neckAt(bake, t)) {
   // Every drop runs the same way, just earlier or later: its place is the Recorrido itself.
   const [sx, sz] = recorridoAt(bake, t)
   const [vx, vz] = velocityAt(bake, t)
@@ -694,8 +978,9 @@ function spot(bake: Way, drop: Drop, t: number, clock: number, open = neckAt(bak
   const [xx, xz, zz] = formaAt(bake.forma, t)
   const geo = Math.sqrt(Math.sqrt(Math.max(xx * zz - xz * xz, 1e-6)))
   const tame = Math.pow(geo / SIZE_REF_KM, SIZE_POWER - 1)
-  const u = drop.u + 0.08 * Math.sin(clock * 0.2 + drop.wobble)
-  const v = drop.v + 0.08 * Math.cos(clock * 0.17 + drop.wobble * 1.7)
+  const wobble = (2 * Math.PI * WOBBLES_PER_YEAR * calendar) / 12
+  const u = drop.u + 0.08 * Math.sin(wobble + drop.wobble)
+  const v = drop.v + 0.08 * Math.cos(wobble + drop.wobble * 1.7)
   const lane = THREE.MathUtils.smoothstep(pace, LANE_FROM, LANE_FULL)
   // On the move each keeps its lane across the way, as wide as the Presencia is that way.
   const nx = -tz
@@ -732,28 +1017,36 @@ function spot(bake: Way, drop: Drop, t: number, clock: number, open = neckAt(bak
   }
 }
 
-function place(bake: Way, hf: Heightfield, all: Drop[], month: number, clock: number) {
+/** Which bank of the Mara a point is on, 0 or 1. */
+function bankAt(ground: FaunaBake['ground'], x: number, z: number) {
+  const ix = THREE.MathUtils.clamp(Math.round((x - MAP.minX) / ground.step), 0, ground.nx - 1)
+  const iz = THREE.MathUtils.clamp(Math.round((z - MAP.minZ) / ground.step), 0, ground.nz - 1)
+  return ground.data[(iz * ground.nx + ix) * 2 + 1] / 255
+}
+
+function place(bake: Way, hf: Heightfield, ground: FaunaBake['ground'], all: Drop[], month: number, calendar: number, especie: number) {
+  const scale = Math.sqrt(ESPECIES[especie].count / HEAD_COUNT)
+  const slot = especie * DROPS
   let minX = Infinity
   let minZ = Infinity
   let maxX = -Infinity
   let maxZ = -Infinity
   let biggest = 0
-  let motion = 0
   const spine: { lag: number; x: number; z: number; r: number }[] = []
   const now = all.map((drop) => {
     const lag = lagAt(drop, month)
-    const here = spot(bake, drop, month + lag, clock)
+    const here = spot(bake, drop, month + lag, calendar)
     // The stream tapers towards its head and tail.
     const taper = 1 - 0.45 * Math.min(1, Math.abs(lag) / (2.3 * LAG_SIGMA))
     let thenX = 0
     let thenZ = 0
     VISCOUS_LOOKS.forEach((k, n) => {
       const before = month - (k * VISCOUS_MONTHS) / 2
-      const then = spot(bake, drop, before + lagAt(drop, before), clock)
+      const then = spot(bake, drop, before + lagAt(drop, before), calendar)
       thenX += then.x * VISCOUS_WEIGHTS[n]
       thenZ += then.z * VISCOUS_WEIGHTS[n]
     })
-    return { lag, here, r: Math.max(0.6, here.size * taper), moveX: here.x - thenX, moveZ: here.z - thenZ }
+    return { lag, here, r: Math.max(0.6, here.size * taper * scale), moveX: here.x - thenX, moveZ: here.z - thenZ }
   })
   all.forEach((drop, i) => {
     const { lag, here, r } = now[i]
@@ -778,9 +1071,9 @@ function place(bake: Way, hf: Heightfield, all: Drop[], month: number, clock: nu
     // Head to tail; the head comes round and the tail thins out as it drains.
     const chain = Array.from({ length: CHAIN_POINTS }, (_, k) => {
       const along = k / (CHAIN_POINTS - 1)
-      const at = spot(bake, drop, t + CHAIN_HEAD - along * (CHAIN_HEAD + CHAIN_TAIL), clock)
+      const at = spot(bake, drop, t + CHAIN_HEAD - along * (CHAIN_HEAD + CHAIN_TAIL), calendar)
       const shape = Math.max(0.3, Math.sqrt(Math.min(1, along / 0.25))) * (1 - 0.65 * along)
-      return [at.x + dx, at.z + dz, at.half * CHAIN_WIDTH * shape]
+      return [at.x + dx, at.z + dz, at.half * CHAIN_WIDTH * shape * scale]
     })
     // Pooled it takes the Presencia's own shape, long where the herd spreads out along the land.
     const [xx, xz, zz] = forma
@@ -792,10 +1085,15 @@ function place(bake: Way, hf: Heightfield, all: Drop[], month: number, clock: nu
     if (px * tx + pz * tz < 0) [px, pz] = [-px, -pz]
     const lane = THREE.MathUtils.smoothstep(pace, LANE_FROM, LANE_FULL)
     const along = r * long
-    uniforms.uDrops.value[i].set(x, z, r / long, hf.heightAt(x, z))
-    uniforms.uAxes.value[i].set(px, pz, along)
+    uniforms.uDrops.value[slot + i].set(x, z, r / long, hf.heightAt(x, z))
+    uniforms.uDropBank.value[slot + i] = bankAt(ground, x, z)
+    uniforms.uAxes.value[slot + i].set(px, pz, along)
+    uniforms.uMotion.value[slot + i] = lane
     spine.push({ lag, x: sx, z: sz, r })
-    chain.forEach(([cx, cz, cr], k) => uniforms.uChain.value[i * CHAIN_POINTS + k].set(cx, cz, cr))
+    chain.forEach(([cx, cz, cr], k) => {
+      uniforms.uChain.value[(slot + i) * CHAIN_POINTS + k].set(cx, cz, cr)
+      uniforms.uChainBank.value[(slot + i) * CHAIN_POINTS + k] = bankAt(ground, cx, cz)
+    })
     for (const [px, pz, pr] of [[x, z, along], ...chain]) {
       minX = Math.min(minX, px)
       minZ = Math.min(minZ, pz)
@@ -803,49 +1101,22 @@ function place(bake: Way, hf: Heightfield, all: Drop[], month: number, clock: nu
       maxZ = Math.max(maxZ, pz)
       biggest = Math.max(biggest, pr)
     }
-    motion += lane / DROPS
   })
-  uniforms.uMotion.value = motion
   // Drops overtake one another, so the spine is threaded in their order along the stream now.
-  spine.sort((a, b) => a.lag - b.lag).forEach((s, k) => uniforms.uSpine.value[k].set(s.x, s.z, s.r))
-  // Past ~2.5 radii a drop adds nothing (the shader skips it), so that is all the margin needed.
-  const size = Math.max(maxX - minX, maxZ - minZ) + 2 * 2.5 * biggest
-  uniforms.uOrigin.value.set((minX + maxX) / 2 - size / 2, (minZ + maxZ) / 2 - size / 2)
-  uniforms.uSize.value = size
+  spine.sort((a, b) => a.lag - b.lag).forEach((s, k) => uniforms.uSpine.value[slot + k].set(s.x, s.z, s.r))
+  return { minX, minZ, maxX, maxZ, biggest }
 }
 
-/**
- * The Avalanchas of the Mara: where the way, held up and all, steps over it, and when each drop
- * gets there, the head first and the tail last.
- */
-function avalanchasOf(way: Way, rivers: RiverLine[], all: Drop[]): Avalancha[] {
-  const spm = way.samplesPerMonth
-  const found: Avalancha[] = []
-  let last = -Infinity
-  for (const { i, river, a, b } of crossingsOf(way.recorrido, rivers)) {
-    if (river !== 'Mara' || (i - last) / spm < SAME_CRUCE) continue
-    last = i
-    const [px, pz] = way.recorrido[i]
-    const [qx, qz] = way.recorrido[(i + 1) % way.recorrido.length]
-    // Where the step meets the river, along both.
-    const [rx, rz] = [b[0] - a[0], b[1] - a[1]]
-    const cross = (qx - px) * rz - (qz - pz) * rx
-    const k = ((a[0] - px) * rz - (a[1] - pz) * rx) / cross
-    const month = (i + k) / spm
-    const length = Math.hypot(rx, rz)
-    found.push({
-      x: px + (qx - px) * k,
-      z: pz + (qz - pz) * k,
-      tx: rx / length,
-      tz: rz / length,
-      caudal: stageAt(CAUDAL.Mara, month),
-      when: (rnd) => {
-        const drop = all[Math.floor(rnd() * all.length)]
-        return month - lagAt(drop, month - drop.lag)
-      },
-    })
-  }
-  return found
+/** One quad under every Mancha. Past ~2.5 radii a drop adds nothing (the shader skips it), so that
+ * is all the margin needed. */
+function cover(bounds: ReturnType<typeof place>[]) {
+  const minX = Math.min(...bounds.map((b) => b.minX))
+  const minZ = Math.min(...bounds.map((b) => b.minZ))
+  const maxX = Math.max(...bounds.map((b) => b.maxX))
+  const maxZ = Math.max(...bounds.map((b) => b.maxZ))
+  const size = Math.max(maxX - minX, maxZ - minZ) + 2 * 2.5 * Math.max(...bounds.map((b) => b.biggest))
+  uniforms.uOrigin.value.set((minX + maxX) / 2 - size / 2, (minZ + maxZ) / 2 - size / 2)
+  uniforms.uSize.value = size
 }
 
 /** ?recorrido draws the way the Manada follows, coloured by month, for checking it by eye. */
@@ -862,12 +1133,52 @@ function RecorridoLine({ bake, hf }: { bake: FaunaBake; hf: Heightfield }) {
   return <Line points={points} vertexColors={colors} lineWidth={2.5} />
 }
 
+const built = new WeakMap<FaunaBake, WeakMap<RiverLine[], Way[]>>()
+
+/** Each species' way through the year, built once and shared with whatever else follows the Manada. */
+function waysOf(raw: FaunaBake, rivers: RiverLine[]) {
+  let byRivers = built.get(raw)
+  if (!byRivers) built.set(raw, (byRivers = new WeakMap()))
+  let ways = byRivers.get(rivers)
+  if (!ways) {
+    ways = ESPECIES.map((e) => rounded({ ...raw, recorrido: e.name === 'gacela' ? raw.gacelas : raw.recorrido }, rivers))
+    byRivers.set(rivers, ways)
+  }
+  return ways
+}
+
+/** Where the centre of the ñus is at a moment of the year. */
+export function manadaAt(raw: FaunaBake, rivers: RiverLine[], month: number) {
+  return recorridoAt(waysOf(raw, rivers)[0], month)
+}
+
+/** How fast the ñus are going at a moment of the year (km a month). */
+export function pasoAt(raw: FaunaBake, rivers: RiverLine[], month: number) {
+  const [vx, vz] = velocityAt(waysOf(raw, rivers)[0], month)
+  return Math.hypot(vx, vz)
+}
+
 export function Fauna() {
   const raw = useFauna()
   const hf = useHeightfield()
-  const bake = useMemo(() => rounded(raw, hf.rivers), [raw, hf.rivers])
+  const ways = useMemo(() => waysOf(raw, hf.rivers), [raw, hf.rivers])
   const all = useMemo(() => drops(), [])
+  const [bake] = ways
   const geometry = useMemo(() => new THREE.PlaneGeometry(1, 1, GRID, GRID), [])
+  const ground = useMemo(() => {
+    const { nx, nz, data } = raw.ground
+    const tex = new THREE.DataTexture(data, nx, nz, THREE.RGFormat)
+    tex.magFilter = THREE.LinearFilter
+    tex.minFilter = THREE.LinearFilter
+    tex.needsUpdate = true
+    return tex
+  }, [raw.ground])
+  useEffect(() => {
+    const { nx, nz, step } = raw.ground
+    uniforms.uGround.value = ground
+    uniforms.uGroundSize.value.set(nx, nz, step)
+    return () => ground.dispose()
+  }, [ground, raw.ground])
 
   const material = useMemo(
     () =>
@@ -876,6 +1187,7 @@ export function Fauna() {
         fragmentShader: fragment,
         uniforms: { ...shared, ...uniforms },
         transparent: true,
+        premultipliedAlpha: true,
         depthWrite: false,
         side: THREE.DoubleSide,
         polygonOffset: true,
@@ -888,27 +1200,19 @@ export function Fauna() {
   useEffect(() => () => geometry.dispose(), [geometry])
   useEffect(() => () => material.dispose(), [material])
 
-  useFrame(() => place(bake, hf, all, useStore.getState().month, shared.uClock.value))
+  const glow = useMemo(() => new Glow(), [])
+  useEffect(() => () => glow.dispose(), [glow])
 
-  // Well inside one drop, so the point is on the liquid whatever its neighbours do.
-  const onMancha = useCallback<OnMancha>(
-    (month, rnd) => {
-      const drop = all[Math.floor(rnd() * all.length)]
-      const { x, z, size } = spot(bake, drop, month + lagAt(drop, month), 0)
-      const angle = rnd() * Math.PI * 2
-      const reach = Math.sqrt(rnd()) * size * 0.45
-      return [x + Math.cos(angle) * reach, z + Math.sin(angle) * reach]
-    },
-    [bake, all],
-  )
-
-  const avalanchas = useMemo(() => avalanchasOf(bake, hf.rivers, all), [bake, hf.rivers, all])
+  useFrame(({ gl }) => {
+    const month = useStore.getState().month
+    cover(ways.map((way, k) => place(way, hf, raw.ground, all, month + ESPECIES[k].ahead, month, k)))
+    glow.draw(gl)
+    uniforms.uGlow.value = glow.texture
+  })
 
   return (
     <>
       <mesh geometry={geometry} material={material} frustumCulled={false} />
-      <Partos onMancha={onMancha} />
-      <Bajas avalanchas={avalanchas} onMancha={onMancha} />
       {SHOW_RECORRIDO && <RecorridoLine bake={bake} hf={hf} />}
     </>
   )

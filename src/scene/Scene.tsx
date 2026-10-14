@@ -3,8 +3,9 @@ import { Bloom, EffectComposer, Noise, ToneMapping, Vignette } from '@react-thre
 import { ToneMappingMode } from 'postprocessing'
 import { MONTHS_PER_SECOND, useStore } from '../store'
 import { shared } from '../shaders/common'
-import { Bruma } from './Bruma'
 import { CameraRig } from './CameraRig'
+import { Corte } from './Corte'
+import { Meteoros } from './Meteoros'
 import { Border, Labels } from './Overlays'
 import { Rivers } from './Rivers'
 import { Sharpen } from './Sharpen'
@@ -37,6 +38,7 @@ export function Scene() {
       <directionalLight position={[-62, 55, 56]} intensity={2.4} color="#ffdcae" />
       <Sky />
       <Terrain />
+      <Corte />
       <Rivers />
       <Groves />
       <Fauna />
@@ -45,7 +47,7 @@ export function Scene() {
       <CameraRig />
       <EffectComposer multisampling={dpr >= 1.5 ? 0 : 4}>
         <Sharpen />
-        <Bruma />
+        <Meteoros />
         <Bloom intensity={0.55} luminanceThreshold={0.82} mipmapBlur />
         <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
         <Noise opacity={0.035} />

@@ -2,6 +2,7 @@ import { Canvas } from '@react-three/fiber'
 import { Suspense, useEffect } from 'react'
 import * as THREE from 'three'
 import { useFauna } from './fauna'
+import { useLluvia } from './lluvia'
 import { Scene } from './scene/Scene'
 import { useStore } from './store'
 import { useHeightfield } from './terrain'
@@ -11,6 +12,7 @@ import { Timeline } from './ui/Timeline'
 function World() {
   useHeightfield()
   useFauna()
+  useLluvia()
   return (
     <>
       <Canvas
