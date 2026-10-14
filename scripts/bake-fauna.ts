@@ -1,5 +1,6 @@
 // Bakes the Recorrido of the Manada, how far it spreads each month, where it crosses the main
-// rivers and the ground it ever reaches, under public/fauna/.
+// rivers, the ground it ever reaches and which bank of the Mara each place is on, under
+// public/fauna/.
 //
 //   pnpm bake:fauna   (after pnpm bake:terrain: it reads public/terrain/)
 //
@@ -392,6 +393,34 @@ function habitat(fixes: Fix[], terrain: { nx: number; nz: number; step: number }
   return out
 }
 
+/**
+ * Which bank of the Mara each cell of the terrain's grid is on, 0 or 255: whether the way due south
+ * from it crosses the river an odd number of times. That flips without a river too, due north of
+ * either end of it, but those seams run off into Kenya past the Mau and over Lago Victoria, where
+ * the Manada never goes.
+ */
+function maraBank(terrain: { nx: number; nz: number; step: number }, river: Pt[]) {
+  const { nx: tx, nz: tz, step } = terrain
+  const out = new Uint8Array(tx * tz)
+  for (let ix = 0; ix < tx; ix++) {
+    const x = MAP.minX + ix * step
+    const hits: number[] = []
+    for (let k = 1; k < river.length; k++) {
+      const [a, b] = [river[k - 1], river[k]]
+      if (a[0] <= x === b[0] <= x) continue
+      hits.push(a[1] + ((x - a[0]) / (b[0] - a[0])) * (b[1] - a[1]))
+    }
+    hits.sort((p, q) => p - q)
+    let k = 0
+    for (let iz = 0; iz < tz; iz++) {
+      const z = MAP.minZ + iz * step
+      while (k < hits.length && hits[k] < z) k++
+      out[iz * tx + ix] = (hits.length - k) % 2 ? 255 : 0
+    }
+  }
+  return out
+}
+
 const NEIGHBOURS: Pt[] = [
   [1, 0],
   [-1, 0],
@@ -597,7 +626,14 @@ const gacelas = recorrido(grid, wallIndex, RECORRIDO_GACELAS)
 const spread = forma(fixes)
 const range = habitat(fixes, terrain, elevation, masks, [path, gacelas])
 console.log(`habitat: ${((range.filter((v) => v > 127).length / range.length) * 100).toFixed(1)}% of the Mapa`)
-await writeFile(`${OUT}/habitat.bin`, range)
+const mara = main.find((r) => r.name === 'Mara')!.lines.reduce((a, b) => (b.length > a.length ? b : a))
+const bank = maraBank(terrain, mara)
+const ground = new Uint8Array(range.length * 2)
+for (let i = 0; i < range.length; i++) {
+  ground[i * 2] = range[i]
+  ground[i * 2 + 1] = bank[i]
+}
+await writeFile(`${OUT}/ground.bin`, ground)
 spread.forEach(([xx, xz, zz], m) => {
   const tr = xx + zz
   const det = xx * zz - xz * xz
@@ -612,7 +648,7 @@ await writeFile(
     minX: MAP.minX,
     minZ: MAP.minZ,
     samplesPerMonth: SAMPLES_PER_MONTH,
-    habitat: { nx: terrain.nx, nz: terrain.nz, step: terrain.step },
+    ground: { nx: terrain.nx, nz: terrain.nz, step: terrain.step },
     recorrido: path.map(([x, z]) => [+x.toFixed(2), +z.toFixed(2)]),
     gacelas: gacelas.map(([x, z]) => [+x.toFixed(2), +z.toFixed(2)]),
     forma: spread,

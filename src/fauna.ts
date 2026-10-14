@@ -11,17 +11,20 @@ export interface FaunaBake {
   forma: [number, number, number][]
   /** Main rivers with their Cruces cut out: lines the Manada may not step over. */
   barriers: [number, number][][]
-  /** Where the Manada can be at all (0–1), on a grid of `nx` × `nz` cells `step` km apart from the map's corner. */
-  habitat: { nx: number; nz: number; step: number; data: Uint8Array }
+  /**
+   * Per cell of a grid of `nx` × `nz` cells `step` km apart from the map's corner, two bytes:
+   * where the Manada can be at all (0–255), and which bank of the Mara it is on (0 or 255).
+   */
+  ground: { nx: number; nz: number; step: number; data: Uint8Array }
 }
 
 async function fetchFauna(): Promise<FaunaBake> {
-  const [res, range] = await Promise.all([fetch('/fauna/fauna.json'), fetch('/fauna/habitat.bin')])
+  const [res, ground] = await Promise.all([fetch('/fauna/fauna.json'), fetch('/fauna/ground.bin')])
   if (!res.ok) throw new Error(`/fauna/fauna.json: ${res.status}`)
-  if (!range.ok) throw new Error(`/fauna/habitat.bin: ${range.status}`)
-  const bake = (await res.json()) as Omit<FaunaBake, 'habitat'> & { minX: number; minZ: number; habitat: Omit<FaunaBake['habitat'], 'data'> }
+  if (!ground.ok) throw new Error(`/fauna/ground.bin: ${ground.status}`)
+  const bake = (await res.json()) as Omit<FaunaBake, 'ground'> & { minX: number; minZ: number; ground: Omit<FaunaBake['ground'], 'data'> }
   if (bake.minX !== MAP.minX || bake.minZ !== MAP.minZ) throw new Error('fauna bake does not match MAP, run pnpm bake:fauna')
-  return { ...bake, habitat: { ...bake.habitat, data: new Uint8Array(await range.arrayBuffer()) } }
+  return { ...bake, ground: { ...bake.ground, data: new Uint8Array(await ground.arrayBuffer()) } }
 }
 
 let pending: Promise<FaunaBake> | null = null

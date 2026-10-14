@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo } from 'react'
 import * as THREE from 'three'
 import { useFauna, type FaunaBake } from '../fauna'
-import { CAUDAL } from '../geo'
+import { CAUDAL, MAP } from '../geo'
 import { stageAt } from '../shaders/rivers'
 import { GLSL_COMMON, shared } from '../shaders/common'
 import { mulberry32, useHeightfield, type Heightfield, type RiverLine } from '../terrain'
@@ -317,9 +317,12 @@ const uniforms = {
   uHeads: { value: ESPECIES.map((e) => e.count) },
   /** How far in each dot of the mesh is, 0 to 1. */
   uGlow: { value: null as THREE.Texture | null },
-  /** Where the Manada can be at all: the ground the collars reach, off the Lagos. */
-  uHabitat: { value: null as THREE.Texture | null },
-  uHabitatSize: { value: new THREE.Vector3() },
+  /** Where the Manada can be at all (r: the ground the collars reach, off the Lagos) and which bank of the Mara it is (g). */
+  uGround: { value: null as THREE.Texture | null },
+  uGroundSize: { value: new THREE.Vector3() },
+  /** Which bank of the Mara each drop is on, and each point of its stretch of the way. */
+  uDropBank: { value: Array.from({ length: SLOTS }, () => 0) },
+  uChainBank: { value: Array.from({ length: SLOTS * CHAIN_POINTS }, () => 0) },
 }
 
 const vertex = /* glsl */ `
@@ -347,8 +350,12 @@ uniform vec3 uChain[${SLOTS * CHAIN_POINTS}];
 uniform float uMotion[${SLOTS}];
 uniform vec3 uColors[${ESPECIES.length}];
 uniform float uHeads[${ESPECIES.length}];
-uniform sampler2D uHabitat;
-uniform vec3 uHabitatSize;
+uniform sampler2D uGround;
+uniform vec3 uGroundSize;
+uniform float uDropBank[${SLOTS}];
+uniform float uChainBank[${SLOTS * CHAIN_POINTS}];
+
+vec2 groundAt(vec2 world) { return texture2D(uGround, ((world - uMapMin) / uGroundSize.z + 0.5) / uGroundSize.xy).rg; }
 
 // A thread of liquid from a to b. At its centre line it always reaches 1, above the surface.
 float thread(vec2 p, vec3 a, vec3 b, float r) {
@@ -391,8 +398,13 @@ float fieldAt(vec2 world, inout float own[${ESPECIES.length}], inout vec2 lungs[
     tnoise(lobes + vec2(uClock * 0.03, 3.1)) * 0.7 + tnoise(lobes * 2.3 - vec2(5.7, uClock * 0.05)) * 0.3,
     tnoise(lobes + vec2(11.3, -uClock * 0.03)) * 0.7 + tnoise(lobes * 2.3 + vec2(uClock * 0.05, 8.9)) * 0.3
   );
+  // The Mara cuts the Manada: a drop lights only its own bank of it, and a stretch of the way only
+  // the banks its ends are on, so it spills across only where it crosses. Taken on the ground, not
+  // the warped body, so the cut runs along the river itself.
+  vec2 ground = groundAt(world);
   float field = 0.0;
   for (int i = 0; i < ${SLOTS}; i++) {
+    if (abs(ground.g - uDropBank[i]) > 0.5) continue;
     vec2 d = p - uDrops[i].xy;
     vec2 t = uAxes[i].xy;
     vec2 n = vec2(-t.y, t.x);
@@ -414,6 +426,7 @@ float fieldAt(vec2 world, inout float own[${ESPECIES.length}], inout vec2 lungs[
     float best = 1e9;
     float along = 0.0;
     for (int k = 0; k + 1 < ${CHAIN_POINTS}; k++) {
+      if (min(abs(ground.g - uChainBank[i * ${CHAIN_POINTS} + k]), abs(ground.g - uChainBank[i * ${CHAIN_POINTS} + k + 1])) > 0.5) continue;
       vec3 a = uChain[i * ${CHAIN_POINTS} + k];
       vec3 b = uChain[i * ${CHAIN_POINTS} + k + 1];
       float d = tube(p, a.xy, b.xy, a.z, b.z);
@@ -441,7 +454,7 @@ float fieldAt(vec2 world, inout float own[${ESPECIES.length}], inout vec2 lungs[
   float land = mix(${LAND_POOR.toFixed(2)}, ${LAND_RICH.toFixed(2)}, lush * (1.0 - steep));
   field = pow(max(field, 1e-6), 1.0 / land);
   // Pinned to the ground rather than the warped body: where the collars never go, no dot lights.
-  field *= texture2D(uHabitat, ((world - uMapMin) / uHabitatSize.z + 0.5) / uHabitatSize.xy).r;
+  field *= ground.r;
   return field;
 }
 `
@@ -1001,7 +1014,14 @@ function spot(bake: Way, drop: Drop, t: number, clock: number, open = neckAt(bak
   }
 }
 
-function place(bake: Way, hf: Heightfield, all: Drop[], month: number, clock: number, especie: number) {
+/** Which bank of the Mara a point is on, 0 or 1. */
+function bankAt(ground: FaunaBake['ground'], x: number, z: number) {
+  const ix = THREE.MathUtils.clamp(Math.round((x - MAP.minX) / ground.step), 0, ground.nx - 1)
+  const iz = THREE.MathUtils.clamp(Math.round((z - MAP.minZ) / ground.step), 0, ground.nz - 1)
+  return ground.data[(iz * ground.nx + ix) * 2 + 1] / 255
+}
+
+function place(bake: Way, hf: Heightfield, ground: FaunaBake['ground'], all: Drop[], month: number, clock: number, especie: number) {
   const scale = Math.sqrt(ESPECIES[especie].count / HEAD_COUNT)
   const slot = especie * DROPS
   let minX = Infinity
@@ -1063,10 +1083,14 @@ function place(bake: Way, hf: Heightfield, all: Drop[], month: number, clock: nu
     const lane = THREE.MathUtils.smoothstep(pace, LANE_FROM, LANE_FULL)
     const along = r * long
     uniforms.uDrops.value[slot + i].set(x, z, r / long, hf.heightAt(x, z))
+    uniforms.uDropBank.value[slot + i] = bankAt(ground, x, z)
     uniforms.uAxes.value[slot + i].set(px, pz, along)
     uniforms.uMotion.value[slot + i] = lane
     spine.push({ lag, x: sx, z: sz, r })
-    chain.forEach(([cx, cz, cr], k) => uniforms.uChain.value[(slot + i) * CHAIN_POINTS + k].set(cx, cz, cr))
+    chain.forEach(([cx, cz, cr], k) => {
+      uniforms.uChain.value[(slot + i) * CHAIN_POINTS + k].set(cx, cz, cr)
+      uniforms.uChainBank.value[(slot + i) * CHAIN_POINTS + k] = bankAt(ground, cx, cz)
+    })
     for (const [px, pz, pr] of [[x, z, along], ...chain]) {
       minX = Math.min(minX, px)
       minZ = Math.min(minZ, pz)
@@ -1122,20 +1146,20 @@ export function Fauna() {
   const all = useMemo(() => drops(), [])
   const [bake] = ways
   const geometry = useMemo(() => new THREE.PlaneGeometry(1, 1, GRID, GRID), [])
-  const habitat = useMemo(() => {
-    const { nx, nz, data } = raw.habitat
-    const tex = new THREE.DataTexture(data, nx, nz, THREE.RedFormat)
+  const ground = useMemo(() => {
+    const { nx, nz, data } = raw.ground
+    const tex = new THREE.DataTexture(data, nx, nz, THREE.RGFormat)
     tex.magFilter = THREE.LinearFilter
     tex.minFilter = THREE.LinearFilter
     tex.needsUpdate = true
     return tex
-  }, [raw.habitat])
+  }, [raw.ground])
   useEffect(() => {
-    const { nx, nz, step } = raw.habitat
-    uniforms.uHabitat.value = habitat
-    uniforms.uHabitatSize.value.set(nx, nz, step)
-    return () => habitat.dispose()
-  }, [habitat, raw.habitat])
+    const { nx, nz, step } = raw.ground
+    uniforms.uGround.value = ground
+    uniforms.uGroundSize.value.set(nx, nz, step)
+    return () => ground.dispose()
+  }, [ground, raw.ground])
 
   const material = useMemo(
     () =>
@@ -1162,7 +1186,7 @@ export function Fauna() {
   useFrame(({ gl }, dt) => {
     const month = useStore.getState().month
     cover(
-      ways.map((way, k) => place(way, hf, all, month + ESPECIES[k].ahead, shared.uClock.value, k)),
+      ways.map((way, k) => place(way, hf, raw.ground, all, month + ESPECIES[k].ahead, shared.uClock.value, k)),
       shared.uClock.value,
     )
     glow.step(gl, dt)
