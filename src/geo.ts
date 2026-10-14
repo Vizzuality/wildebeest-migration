@@ -52,8 +52,9 @@ export const PLACES: { name: string; at: LonLat; kind?: 'country' | 'water' | 'r
   { name: 'Corredor occidental', at: [34.42, -2.3] },
   { name: 'Kogatende', at: [34.88, -1.64] },
   { name: 'Masái Mara', at: [35.12, -1.3] },
-  // West of the Mara, so the Manada crosses the river to get there and again to come back.
-  { name: 'Triángulo del Mara', at: [34.907, -1.407] },
+  // West of the Mara, so the Manada crosses the river to get there and again to come back. Where
+  // the collars on that bank are in August and September: the south of the Triangle, near the river.
+  { name: 'Triángulo del Mara', at: [34.907, -1.479] },
   { name: 'Lobo', at: [35.17, -1.98] },
   { name: 'Ngorongoro', at: [35.58, -3.18] },
   { name: 'Lago Victoria', at: [33.65, -1.15], kind: 'water' },
