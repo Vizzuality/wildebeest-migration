@@ -62,10 +62,10 @@ const BREATH_LOW = 0.45
  * threshold, whichever species it is. Along a stream it burns SHINE_BREATH less at the head and the
  * tail.
  */
-const SHINE = 0.9
+const SHINE = 3
 const SHINE_BREATH = 0.5
 /** The most a dot's middle burns over its own colour. */
-const GLARE_MAX = 1.4
+const GLARE_MAX = 2.6
 /** The field over which the Apiñamiento goes from none to full. */
 const CROWD_FROM = 2
 const CROWD_FULL = 9
@@ -87,7 +87,12 @@ const DOT_CROWDED_KM = 0.28
 const WARM = 0.03
 const HOT = 0.08
 const HALO = 1.8
-const HALO_ALPHA = 0.12
+const HALO_ALPHA = 0.35
+/**
+ * Blurred into their mean far off, the dots cover too little of the ground to read at map scale,
+ * so the mean is drawn FAR_BOOST times as thick.
+ */
+const FAR_BOOST = 2
 /**
  * A perfectly regular mesh in motion makes waves the eye invents, and moiré against the pixels.
  * Each dot is nudged off its place by up to JITTER of the spacing and drawn up to SIZE_SPREAD
@@ -290,9 +295,9 @@ function drops(): Drop[] {
  * species' animals are long next to a wildebeest (`size`).
  */
 const ESPECIES = [
-  { name: 'ñu', count: 1.3, ahead: 0, size: 1, color: [0.24, 0.22, 0.24] },
+  { name: 'ñu', count: 1.3, ahead: 0, size: 1, color: [0.36, 0.44, 0.62] },
   { name: 'cebra', count: 0.2, ahead: 0.025, size: 1.1, color: [0.86, 0.84, 0.78] },
-  { name: 'gacela', count: 0.35, ahead: 0, size: 0.45, color: [0.72, 0.48, 0.28] },
+  { name: 'gacela', count: 0.35, ahead: 0, size: 0.45, color: [1.0, 0.8, 0.52] },
 ] as const
 const HEAD_COUNT = ESPECIES.reduce((sum, e) => sum + e.count, 0)
 const SLOTS = DROPS * ESPECIES.length
@@ -530,7 +535,7 @@ void main() {
   float spill = dist / max(radius * ${HALO.toFixed(1)}, 1e-4);
   float halo = ${HALO_ALPHA.toFixed(2)} * exp(-4.0 * spill * spill);
   // How much of a cell the bulb lights, for where the cells are too small to tell apart.
-  float mean = 3.14159 * radius * radius * (1.0 + ${(HALO_ALPHA * HALO * HALO * 0.25).toFixed(3)}) / ${(MESH_KM * MESH_KM).toFixed(4)};
+  float mean = 3.14159 * radius * radius * (1.0 + ${(HALO_ALPHA * HALO * HALO * 0.25).toFixed(3)}) * ${FAR_BOOST.toFixed(1)} / ${(MESH_KM * MESH_KM).toFixed(4)};
   float blur = smoothstep(0.5, 0.9, length(fwidth(cell)));
   float alpha = min(mix(max(glass, halo), mean, blur), 1.0) * glowing;
   // No bulb lights a rock face: a dot's edge or halo over the dark shadow under a cliff reads as a
