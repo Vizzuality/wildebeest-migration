@@ -317,6 +317,9 @@ const uniforms = {
   uHeads: { value: ESPECIES.map((e) => e.count) },
   /** How far in each dot of the mesh is, 0 to 1. */
   uGlow: { value: null as THREE.Texture | null },
+  /** Where the Manada can be at all: the ground the collars reach, off the Lagos. */
+  uHabitat: { value: null as THREE.Texture | null },
+  uHabitatSize: { value: new THREE.Vector3() },
 }
 
 const vertex = /* glsl */ `
@@ -344,6 +347,8 @@ uniform vec3 uChain[${SLOTS * CHAIN_POINTS}];
 uniform float uMotion[${SLOTS}];
 uniform vec3 uColors[${ESPECIES.length}];
 uniform float uHeads[${ESPECIES.length}];
+uniform sampler2D uHabitat;
+uniform vec3 uHabitatSize;
 
 // A thread of liquid from a to b. At its centre line it always reaches 1, above the surface.
 float thread(vec2 p, vec3 a, vec3 b, float r) {
@@ -435,6 +440,8 @@ float fieldAt(vec2 world, inout float own[${ESPECIES.length}], inout vec2 lungs[
   float steep = smoothstep(0.04, 0.2, length(slope));
   float land = mix(${LAND_POOR.toFixed(2)}, ${LAND_RICH.toFixed(2)}, lush * (1.0 - steep));
   field = pow(max(field, 1e-6), 1.0 / land);
+  // Pinned to the ground rather than the warped body: where the collars never go, no dot lights.
+  field *= texture2D(uHabitat, ((world - uMapMin) / uHabitatSize.z + 0.5) / uHabitatSize.xy).r;
   return field;
 }
 `
@@ -1115,6 +1122,20 @@ export function Fauna() {
   const all = useMemo(() => drops(), [])
   const [bake] = ways
   const geometry = useMemo(() => new THREE.PlaneGeometry(1, 1, GRID, GRID), [])
+  const habitat = useMemo(() => {
+    const { nx, nz, data } = raw.habitat
+    const tex = new THREE.DataTexture(data, nx, nz, THREE.RedFormat)
+    tex.magFilter = THREE.LinearFilter
+    tex.minFilter = THREE.LinearFilter
+    tex.needsUpdate = true
+    return tex
+  }, [raw.habitat])
+  useEffect(() => {
+    const { nx, nz, step } = raw.habitat
+    uniforms.uHabitat.value = habitat
+    uniforms.uHabitatSize.value.set(nx, nz, step)
+    return () => habitat.dispose()
+  }, [habitat, raw.habitat])
 
   const material = useMemo(
     () =>

@@ -1,5 +1,5 @@
-// Bakes the Recorrido of the Manada, how far it spreads each month and where it crosses the
-// main rivers, under public/fauna/.
+// Bakes the Recorrido of the Manada, how far it spreads each month, where it crosses the main
+// rivers and the ground it ever reaches, under public/fauna/.
 //
 //   pnpm bake:fauna   (after pnpm bake:terrain: it reads public/terrain/)
 //
@@ -34,6 +34,19 @@ const RIVER_SHY_KM = 4
 const RIVER_COST = 8
 /** Recorrido samples per month. */
 const SAMPLES_PER_MONTH = 60
+/**
+ * The Manada only spreads where the collars have been: each STEP-wide cell counts the animal-years
+ * seen there, blurred over HABITAT_SIGMA_KM, and the ground is habitable from HABITAT_FROM to
+ * HABITAT_FULL of that. The blur barely reaches ground more than HABITAT_CLIMB_KM higher or lower,
+ * so the plains at the foot of an escarpment don't spill onto its top, where the collars never go.
+ * Within HABITAT_WAY_KM of a Recorrido (fading out by twice that) it is always habitable, so the
+ * Mancha stays whole where the way runs past the collars.
+ */
+const HABITAT_SIGMA_KM = 2
+const HABITAT_CLIMB_KM = 0.06
+const HABITAT_FROM = 0.05
+const HABITAT_FULL = 0.4
+const HABITAT_WAY_KM = 3
 
 const nx = Math.round((MAP.maxX - MAP.minX) / STEP) + 1
 const nz = Math.round((MAP.maxZ - MAP.minZ) / STEP) + 1
@@ -303,6 +316,82 @@ function costGrid(terrain: { nx: number; nz: number; step: number }, elevation: 
   return { height, lake, trees, near }
 }
 
+/**
+ * Where the Manada can be, 0–255 on the terrain's own grid, fine enough for a small Lago or the
+ * lip of an escarpment: where collars have been, off the Lagos.
+ */
+function habitat(fixes: Fix[], terrain: { nx: number; nz: number; step: number }, elevation: Uint16Array, masks: Uint8Array, ways: Pt[][]) {
+  const { nx: tx, nz: tz, step } = terrain
+  const height = Float32Array.from(elevation, (h) => h / 10000)
+  const heightAt = (x: number, z: number) => height[Math.round((z - MAP.minZ) / step) * tx + Math.round((x - MAP.minX) / step)]
+  // Animal-years per km², counted on the routing grid, with the heights the collars were seen at.
+  const seen = new Map<number, { years: Set<string>; low: number; high: number }>()
+  for (const f of fixes) {
+    const ix = Math.round((f.x - MAP.minX) / STEP)
+    const iz = Math.round((f.z - MAP.minZ) / STEP)
+    if (ix < 0 || iz < 0 || ix >= nx || iz >= nz) continue
+    const i = iz * nx + ix
+    const h = heightAt(f.x, f.z)
+    const cell = seen.get(i) ?? { years: new Set(), low: h, high: h }
+    cell.years.add(`${f.id}:${new Date(f.t).getUTCFullYear()}`)
+    cell.low = Math.min(cell.low, h)
+    cell.high = Math.max(cell.high, h)
+    seen.set(i, cell)
+  }
+  // Painted onto the terrain's grid only where the ground is as high as the collars were in that
+  // cell, so a cell across the lip of an escarpment doesn't count for the top.
+  let count = new Float32Array(tx * tz)
+  for (let iz = 0; iz < tz; iz++)
+    for (let ix = 0; ix < tx; ix++) {
+      const i = iz * tx + ix
+      const cell = seen.get(Math.round((iz * step) / STEP) * nx + Math.round((ix * step) / STEP))
+      if (cell && height[i] >= cell.low - HABITAT_CLIMB_KM && height[i] <= cell.high + HABITAT_CLIMB_KM) count[i] = cell.years.size
+    }
+  const reach = Math.ceil((HABITAT_SIGMA_KM * 3) / step)
+  const kernel = Array.from({ length: 2 * reach + 1 }, (_, k) => Math.exp(-0.5 * (((k - reach) * step) / HABITAT_SIGMA_KM) ** 2))
+  const blur = (src: Float32Array, dx: number, dz: number) => {
+    const out = new Float32Array(tx * tz)
+    for (let iz = 0; iz < tz; iz++)
+      for (let ix = 0; ix < tx; ix++) {
+        const i = iz * tx + ix
+        let sum = 0
+        let weight = 0
+        for (let k = -reach; k <= reach; k++) {
+          const jx = ix + k * dx
+          const jz = iz + k * dz
+          if (jx < 0 || jz < 0 || jx >= tx || jz >= tz) continue
+          const j = jz * tx + jx
+          const w = kernel[k + reach] * Math.exp(-(((height[j] - height[i]) / HABITAT_CLIMB_KM) ** 2))
+          sum += src[j] * w
+          weight += w
+        }
+        out[i] = sum / weight
+      }
+    return out
+  }
+  count = blur(blur(count, 1, 0), 0, 1)
+  const smooth = (t: number) => {
+    const c = Math.min(1, Math.max(0, t))
+    return c * c * (3 - 2 * c)
+  }
+  const out = new Uint8Array(tx * tz)
+  for (let i = 0; i < out.length; i++) out[i] = Math.round(255 * smooth((count[i] - HABITAT_FROM) / (HABITAT_FULL - HABITAT_FROM)))
+  const far = Math.ceil((HABITAT_WAY_KM * 2) / step)
+  for (const way of ways)
+    for (const [x, z] of way) {
+      const cx = Math.round((x - MAP.minX) / step)
+      const cz = Math.round((z - MAP.minZ) / step)
+      for (let iz = Math.max(0, cz - far); iz <= Math.min(tz - 1, cz + far); iz++)
+        for (let ix = Math.max(0, cx - far); ix <= Math.min(tx - 1, cx + far); ix++) {
+          const d = Math.hypot(MAP.minX + ix * step - x, MAP.minZ + iz * step - z)
+          const i = iz * tx + ix
+          out[i] = Math.max(out[i], Math.round(255 * smooth(2 - d / HABITAT_WAY_KM)))
+        }
+    }
+  for (let i = 0; i < out.length; i++) if (masks[i * 2 + 1] > 127) out[i] = 0
+  return out
+}
+
 const NEIGHBOURS: Pt[] = [
   [1, 0],
   [-1, 0],
@@ -506,6 +595,9 @@ const path = recorrido(grid, wallIndex, RECORRIDO)
 console.log('Recorrido de las gacelas:')
 const gacelas = recorrido(grid, wallIndex, RECORRIDO_GACELAS)
 const spread = forma(fixes)
+const range = habitat(fixes, terrain, elevation, masks, [path, gacelas])
+console.log(`habitat: ${((range.filter((v) => v > 127).length / range.length) * 100).toFixed(1)}% of the Mapa`)
+await writeFile(`${OUT}/habitat.bin`, range)
 spread.forEach(([xx, xz, zz], m) => {
   const tr = xx + zz
   const det = xx * zz - xz * xz
@@ -520,6 +612,7 @@ await writeFile(
     minX: MAP.minX,
     minZ: MAP.minZ,
     samplesPerMonth: SAMPLES_PER_MONTH,
+    habitat: { nx: terrain.nx, nz: terrain.nz, step: terrain.step },
     recorrido: path.map(([x, z]) => [+x.toFixed(2), +z.toFixed(2)]),
     gacelas: gacelas.map(([x, z]) => [+x.toFixed(2), +z.toFixed(2)]),
     forma: spread,

@@ -107,7 +107,7 @@ Cuánto se extiende la Manada en cada mes y en qué dirección se alarga, deriva
 _Avoid_: densidad, heatmap, extensión
 
 **Mancha**:
-La forma en que se ve cada especie de la Manada a escala de Mapa: un único cuerpo espeso, como barro, siempre de una pieza, que fluye por el Recorrido. Al trasladarse se estira en una corriente: la cabeza tira y la cola va detrás. En cada parada se encharca. Nunca salta ni se rompe. Las Manchas de distintas especies se funden en un solo cuerpo donde coinciden y se separan donde sus Recorridos se apartan. Se dibuja como una malla de puntos fija al Relieve: cada punto es de una especie, no se mueve, y aparece y se apaga al paso de la Manada. Fuera de la Mancha no hay malla.
+La forma en que se ve cada especie de la Manada a escala de Mapa: un único cuerpo espeso, como barro, siempre de una pieza, que fluye por el Recorrido. Al trasladarse se estira en una corriente: la cabeza tira y la cola va detrás. En cada parada se encharca. Nunca salta ni se rompe. Las Manchas de distintas especies se funden en un solo cuerpo donde coinciden y se separan donde sus Recorridos se apartan. Se dibuja como una malla de puntos fija al Relieve: cada punto es de una especie, no se mueve, y aparece y se apaga al paso de la Manada. Fuera de la Mancha no hay malla. Solo se extiende por el suelo que pisan los collares: nunca sobre un Lago ni encima de un escarpe al que no suben, salvo justo alrededor del Recorrido, para no romperse.
 _Avoid_: blob, metaball, líquido, gotas, punteado
 
 **Apiñamiento**:
