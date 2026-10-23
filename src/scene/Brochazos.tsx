@@ -133,15 +133,15 @@ void main() {
   col = mix(col, fresh, smoothstep(9.0, 7.0, distance(xz, uCrater)) * 0.4);
   if (distance(xz, uCraterLake) < 1.8) col = ${rgb('#f3e8e3')};
 
-  // Rivers: pale Lecho, water while it runs and greyer once it stands in Pozas, laid along the flow.
+  // Rivers: pale Lecho, water while it runs and greyer once it stands in Pozas, the whole Lecho laid
+  // along the flow so a Brochazo the water reaches only changes colour, never shape.
   float laid = 0.25;
   River river = riverAt(xz);
-  if (river.water) {
+  if (river.lecho) {
     vec3 runs = mix(${rgb('#5b9bdb')}, ${rgb('#7fb3e6')}, shade);
-    col = mix(${rgb('#86a9c4')}, runs, smoothstep(0.3, 0.6, river.stage));
+    vec3 water = mix(${rgb('#86a9c4')}, runs, smoothstep(0.3, 0.6, river.stage));
+    col = mix(mix(${rgb('#ecdcbd')}, ${rgb('#e2cfae')}, shade), water, river.water);
     laid = 0.5 + 0.5 * fract(atan(river.flow.y, river.flow.x) / 6.28318530718);
-  } else if (river.lecho) {
-    col = mix(${rgb('#ecdcbd')}, ${rgb('#e2cfae')}, shade);
   }
 
   if (texture2D(uLake, gridUv(xz)).r > 0.5) col = mix(${rgb('#5f9bd6')}, ${rgb('#8cbbe7')}, shade);

@@ -154,11 +154,12 @@ uniform float uRiverStage[${MAX_RIVERS}];
 uniform float uRiverHalf[${MAX_RIVERS}];
 uniform float uRiverMain[${MAX_RIVERS}];
 
-struct River { bool lecho; bool water; float stage; float main; vec2 flow; };
+struct River { bool lecho; float water; float stage; float main; vec2 flow; };
 
-// Whether a point is on a Lecho and in its water, and where the water runs.
+// Whether a point is on a Lecho, how far it is under its water (0–1, rising and falling over a
+// stretch of the Caudal rather than at once), and where the water runs.
 River riverAt(vec2 xz) {
-  River r = River(false, false, 0.0, 0.0, vec2(0.0));
+  River r = River(false, 0.0, 0.0, 0.0, vec2(0.0));
   vec2 uv = (xz - vec2(${MAP.minX.toFixed(1)}, ${MAP.minZ.toFixed(1)})) /
     vec2(${(MAP.maxX - MAP.minX).toFixed(1)}, ${(MAP.maxZ - MAP.minZ).toFixed(1)});
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return r;
@@ -181,7 +182,7 @@ River riverAt(vec2 xz) {
   float pool = tnoise(xz * 1.4 + 17.0) * 0.6 + tnoise(xz * 4.1 - 9.0) * 0.4;
   float pools = smoothstep(0.0, 0.08, pool - mix(0.9, 0.0, smoothstep(0.02, 0.35, s)));
   float waterHalf = bed * max(wide * runs, 0.6 * pools);
-  r.water = d < waterHalf;
+  r.water = 1.0 - smoothstep(waterHalf - 0.25 * bed, waterHalf + 0.25 * bed, d);
 
   float a = (f.a - 0.5) * 6.28318530718;
   r.flow = vec2(cos(a), sin(a));
