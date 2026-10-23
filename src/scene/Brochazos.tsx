@@ -21,8 +21,13 @@ function rgb(hex: string) {
 
 export const PAPER = '#f5f0e3'
 
-/** How far a Brochazo's paint reaches, in its own sizes: further and close ones run together sooner. */
-const REACH = 2.2
+/**
+ * Brochazos whose rims come closer than about half of FUSE_KM run together through a rounded neck,
+ * like two drops of wet paint touching; the larger, the further apart they still join.
+ */
+const FUSE_KM = 0.6
+/** How far in from its rim (km) a Brochazo's paint reaches its full thickness. */
+const BODY_KM = 0.2
 /** How thick the paint stands (km) for a full measure of it: the deeper, the harder it is lit. */
 const IMPASTO_KM = 0.25
 
@@ -209,11 +214,9 @@ vec4 cellOf(sampler2D cells, vec2 id) {
   return texelFetch(cells, ivec2(texel), 0);
 }
 
-const float REACH = ${REACH.toFixed(2)};
-
-// How much paint a Brochazo leaves at p: a dab long along its angle, thick in its middle and
-// thinning out past its ragged rim. along is how far p is along it, 0 at its start and 1 at its end;
-// bristles is how thick the paint stands there, furrowed along the stroke by the brush's hairs.
+// How far p is (km) outside a Brochazo's ragged rim, negative inside it: a dab long along its
+// angle. along is how far p is along it, 0 at its start and 1 at its end; bristles is how thick the
+// paint stands there, furrowed along the stroke by the brush's hairs.
 float dab(vec2 p, vec2 c, float angle, vec2 size, vec2 id, out float along, out float bristles) {
   vec2 d = p - c;
   float ca = cos(angle);
@@ -222,23 +225,40 @@ float dab(vec2 p, vec2 c, float angle, vec2 size, vec2 id, out float along, out 
   along = q.x * 0.5 + 0.5;
   bristles = 0.75 + 0.25 * sin(q.y * 10.0 + hash12(id + 5.9) * 6.28 + tnoise(vec2(q.x * 1.5, id.x)) * 2.0);
   float r = length(q);
-  if (r > REACH) return 0.0;
   float rag = tnoise(p * 2.5 + id * 3.1) * 0.12 + tnoise(p * 6.0 - id) * 0.06;
-  float k = clamp((r + rag) / REACH, 0.0, 1.0);
-  return (1.0 - k * k) * (1.0 - k * k);
+  return (r + rag - 1.0) * size.y;
 }
 
-// The paint a lone Brochazo leaves at its rim. Where two lie close their paint adds up past it
-// between them, so they run together into one.
-const float FUSE = ${((1 - 1 / REACH ** 2) ** 2).toFixed(3)};
+const float FUSE_KM = ${FUSE_KM.toFixed(3)};
 
-// Lays down one pass of paint from its Brochazos in top's colour, the one with most paint at p, so
-// fused Brochazos share an outline but each keeps a crisp colour of its own. shown is how much of
-// the pass shows at p.
-vec3 laid(vec3 col, float paint, vec4 top, out float shown) {
-  float edge = 0.7 * fwidth(paint);
-  shown = smoothstep(FUSE - edge, FUSE + edge, paint);
-  return mix(col, top.rgb, shown);
+// One pass of paint at p, built up a Brochazo at a time: rim is how far p is outside the fused paint,
+// nearest how far outside the nearest Brochazo, whose colour and bristles it takes, so fused
+// Brochazos share an outline but each keeps a crisp colour of its own.
+struct Pass {
+  float rim;
+  float nearest;
+  vec3 col;
+  float bristles;
+};
+
+Pass none() { return Pass(1e3, 1e3, vec3(0.0), 0.0); }
+
+void add(inout Pass pass, float d, vec3 col, float bristles) {
+  float h = max(FUSE_KM - abs(pass.rim - d), 0.0) / FUSE_KM;
+  pass.rim = min(pass.rim, d) - h * h * FUSE_KM * 0.25;
+  if (d < pass.nearest) {
+    pass.nearest = d;
+    pass.col = col;
+    pass.bristles = bristles;
+  }
+}
+
+// Lays the pass over col; shown is how much of it shows at p, and its paint how thick it stands.
+vec3 laid(vec3 col, Pass pass, float fw, out float shown, out float paint) {
+  float edge = 0.7 * fw;
+  shown = 1.0 - smoothstep(-edge, edge, pass.rim);
+  paint = shown * smoothstep(0.0, ${BODY_KM.toFixed(3)}, -pass.rim) * pass.bristles;
+  return mix(col, pass.col, shown);
 }
 
 // Impasto: the paint stands off the paper as thick as it was laid, so it catches the light from the
@@ -278,9 +298,7 @@ void main() {
   vec3 col = uPaper * (0.99 + 0.02 * tnoise(xz * 1.3));
 
   vec2 cell = floor(xz / BROCHAZO_KM);
-  float paint = 0.0;
-  float thick = 0.0;
-  vec4 top = vec4(0.0);
+  Pass pass = none();
   float bristles;
   for (int j = -1; j <= 1; j++) {
     for (int i = -1; i <= 1; i++) {
@@ -293,20 +311,17 @@ void main() {
       float len = BROCHAZO_KM * mix(0.55, 0.7, hash12(id + 2.9));
       float wide = len * mix(0.38, 0.55, hash12(id + 8.3));
       float along;
-      float a = dab(xz, at, angle, vec2(len, wide), id, along, bristles);
-      if (a <= 0.0) continue;
-      paint += a;
-      thick += a * bristles;
-      if (a > top.a) top = vec4(broken(manchaOver(srgb(s.rgb), id, along, xz), id), a);
+      float d = dab(xz, at, angle, vec2(len, wide), id, along, bristles);
+      if (d > FUSE_KM) continue;
+      add(pass, d, broken(manchaOver(srgb(s.rgb), id, along, xz), id), bristles);
     }
   }
   float shown;
-  col = laid(col, paint, top, shown);
-  float height = thick * shown;
+  float paint;
+  col = laid(col, pass, fw, shown, paint);
+  float height = paint;
   cell = floor(xz / BROCHAZO_KM - 0.5);
-  paint = 0.0;
-  thick = 0.0;
-  top = vec4(0.0);
+  pass = none();
   for (int j = -1; j <= 1; j++) {
     for (int i = -1; i <= 1; i++) {
       vec2 id = cell + vec2(float(i), float(j));
@@ -315,15 +330,13 @@ void main() {
       vec2 at = vegetacionAt(id);
       float len = BROCHAZO_KM * mix(0.46, 0.6, hash12(id + 4.7));
       float along;
-      float a = dab(xz, at, brushAngle(at, id + 0.5), vec2(len, len * mix(0.45, 0.65, hash12(id + 6.1))), id + 0.5, along, bristles);
-      if (a <= 0.0) continue;
-      paint += a;
-      thick += a * bristles;
-      if (a > top.a) top = vec4(broken(manchaOver(srgb(s.rgb), floor(at / BROCHAZO_KM), along, xz), id + 0.5), a);
+      float d = dab(xz, at, brushAngle(at, id + 0.5), vec2(len, len * mix(0.45, 0.65, hash12(id + 6.1))), id + 0.5, along, bristles);
+      if (d > FUSE_KM) continue;
+      add(pass, d, broken(manchaOver(srgb(s.rgb), floor(at / BROCHAZO_KM), along, xz), id + 0.5), bristles);
     }
   }
-  col = laid(col, paint, top, shown);
-  col = lit(col, height + thick * shown, fw);
+  col = laid(col, pass, fw, shown, paint);
+  col = lit(col, height + paint, fw);
 
   gl_FragColor = vec4(col, 1.0);
   #include <colorspace_fragment>
