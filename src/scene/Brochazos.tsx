@@ -23,6 +23,8 @@ export const PAPER = '#f5f0e3'
 
 /** How far a Brochazo's paint reaches, in its own sizes: further and close ones run together sooner. */
 const REACH = 2.2
+/** How thick the paint stands (km) for a full measure of it: the deeper, the harder it is lit. */
+const IMPASTO_KM = 0.25
 
 // Real coordinates: centre of the crater floor, and Lake Magadi from OpenStreetMap.
 const CRATER = project([35.575, -3.18])
@@ -210,13 +212,15 @@ vec4 cellOf(sampler2D cells, vec2 id) {
 const float REACH = ${REACH.toFixed(2)};
 
 // How much paint a Brochazo leaves at p: a dab long along its angle, thick in its middle and
-// thinning out past its ragged rim. along is how far p is along it, 0 at its start and 1 at its end.
-float dab(vec2 p, vec2 c, float angle, vec2 size, vec2 id, out float along) {
+// thinning out past its ragged rim. along is how far p is along it, 0 at its start and 1 at its end;
+// bristles is how thick the paint stands there, furrowed along the stroke by the brush's hairs.
+float dab(vec2 p, vec2 c, float angle, vec2 size, vec2 id, out float along, out float bristles) {
   vec2 d = p - c;
   float ca = cos(angle);
   float sa = sin(angle);
   vec2 q = vec2(ca * d.x + sa * d.y, ca * d.y - sa * d.x) / size;
   along = q.x * 0.5 + 0.5;
+  bristles = 0.75 + 0.25 * sin(q.y * 10.0 + hash12(id + 5.9) * 6.28 + tnoise(vec2(q.x * 1.5, id.x)) * 2.0);
   float r = length(q);
   if (r > REACH) return 0.0;
   float rag = tnoise(p * 2.5 + id * 3.1) * 0.12 + tnoise(p * 6.0 - id) * 0.06;
@@ -229,10 +233,22 @@ float dab(vec2 p, vec2 c, float angle, vec2 size, vec2 id, out float along) {
 const float FUSE = ${((1 - 1 / REACH ** 2) ** 2).toFixed(3)};
 
 // Lays down one pass of paint from its Brochazos in top's colour, the one with most paint at p, so
-// fused Brochazos share an outline but each keeps a crisp colour of its own.
-vec3 laid(vec3 col, float paint, vec4 top) {
+// fused Brochazos share an outline but each keeps a crisp colour of its own. shown is how much of
+// the pass shows at p.
+vec3 laid(vec3 col, float paint, vec4 top, out float shown) {
   float edge = 0.7 * fwidth(paint);
-  return mix(col, top.rgb, smoothstep(FUSE - edge, FUSE + edge, paint));
+  shown = smoothstep(FUSE - edge, FUSE + edge, paint);
+  return mix(col, top.rgb, shown);
+}
+
+// Impasto: the paint stands off the paper as thick as it was laid, so it catches the light from the
+// top left of the picture on one side of every stroke and falls into shadow on the other.
+const vec3 LIGHT = vec3(-0.55, 0.55, 0.63);
+vec3 lit(vec3 col, float height, float fw) {
+  vec2 slope = vec2(dFdx(height), dFdy(height)) / max(fw, 1e-6) * ${IMPASTO_KM.toFixed(3)};
+  vec3 n = normalize(vec3(-slope, 1.0));
+  float light = dot(n, LIGHT) / LIGHT.z;
+  return col * clamp(mix(1.0, light, 0.6), 0.6, 1.35);
 }
 
 // Broken colour, as Seurat laid it: each Brochazo takes a purer, warmer, cooler or lighter take on
@@ -263,7 +279,9 @@ void main() {
 
   vec2 cell = floor(xz / BROCHAZO_KM);
   float paint = 0.0;
+  float thick = 0.0;
   vec4 top = vec4(0.0);
+  float bristles;
   for (int j = -1; j <= 1; j++) {
     for (int i = -1; i <= 1; i++) {
       vec2 id = cell + vec2(float(i), float(j));
@@ -275,15 +293,19 @@ void main() {
       float len = BROCHAZO_KM * mix(0.55, 0.7, hash12(id + 2.9));
       float wide = len * mix(0.38, 0.55, hash12(id + 8.3));
       float along;
-      float a = dab(xz, at, angle, vec2(len, wide), id, along);
+      float a = dab(xz, at, angle, vec2(len, wide), id, along, bristles);
       if (a <= 0.0) continue;
       paint += a;
+      thick += a * bristles;
       if (a > top.a) top = vec4(broken(manchaOver(srgb(s.rgb), id, along, xz), id), a);
     }
   }
-  col = laid(col, paint, top);
+  float shown;
+  col = laid(col, paint, top, shown);
+  float height = thick * shown;
   cell = floor(xz / BROCHAZO_KM - 0.5);
   paint = 0.0;
+  thick = 0.0;
   top = vec4(0.0);
   for (int j = -1; j <= 1; j++) {
     for (int i = -1; i <= 1; i++) {
@@ -293,13 +315,15 @@ void main() {
       vec2 at = vegetacionAt(id);
       float len = BROCHAZO_KM * mix(0.46, 0.6, hash12(id + 4.7));
       float along;
-      float a = dab(xz, at, brushAngle(at, id + 0.5), vec2(len, len * mix(0.45, 0.65, hash12(id + 6.1))), id + 0.5, along);
+      float a = dab(xz, at, brushAngle(at, id + 0.5), vec2(len, len * mix(0.45, 0.65, hash12(id + 6.1))), id + 0.5, along, bristles);
       if (a <= 0.0) continue;
       paint += a;
+      thick += a * bristles;
       if (a > top.a) top = vec4(broken(manchaOver(srgb(s.rgb), floor(at / BROCHAZO_KM), along, xz), id + 0.5), a);
     }
   }
-  col = laid(col, paint, top);
+  col = laid(col, paint, top, shown);
+  col = lit(col, height + thick * shown, fw);
 
   gl_FragColor = vec4(col, 1.0);
   #include <colorspace_fragment>
