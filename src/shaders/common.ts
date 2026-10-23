@@ -115,15 +115,22 @@ float verdorIn(vec2 uv, int month) {
   return (c == 0 ? v.x : c == 1 ? v.y : c == 2 ? v.z : v.w) * (255.0 / 250.0);
 }
 
-// Verdor (NDVI) at a point now. Between one mid-month and the next each spot turns at its own
-// moment, set by \`order\` (0–1), so green spreads and recedes in patches instead of fading evenly.
+// Verdor (NDVI) at a point now, on a smooth curve through the mid-month values so it never stops
+// and lurches. Each spot runs up to a week ahead of or behind the calendar, set by \`order\` (0–1),
+// so green spreads and recedes in patches instead of fading evenly.
 float verdor(vec2 xz, float order) {
-  float t = uMonth - 0.5;
+  float t = uMonth - 0.5 + (order - 0.5) * 0.5;
   float fi = floor(t);
   int i = int(fi);
+  float f = t - fi;
   vec2 uv = gridUv(xz);
-  float p = smoothstep(order * 0.7, order * 0.7 + 0.3, t - fi);
-  return mix(verdorIn(uv, i), verdorIn(uv, i + 1), p);
+  float v0 = verdorIn(uv, i - 1);
+  float v1 = verdorIn(uv, i);
+  float v2 = verdorIn(uv, i + 1);
+  float v3 = verdorIn(uv, i + 2);
+  // Catmull-Rom, kept within the two months it runs between so it never overshoots either.
+  float v = v1 + 0.5 * f * (v2 - v0 + f * (2.0 * v0 - 5.0 * v1 + 4.0 * v2 - v3 + f * (3.0 * (v1 - v2) + v3 - v0)));
+  return clamp(v, min(v1, v2), max(v1, v2));
 }
 
 // How green the grass reads (0 = straw, 1 = full flush) for an NDVI value.

@@ -94,9 +94,12 @@ void main() {
     // Cultivo: a patchwork of plots, each tilled red soil, stubble or, as the rains come, green crop.
     vec2 plotUv = mat2(0.94, -0.34, 0.34, 0.94) * xz / 2.2;
     vec2 plotId = floor(vec2(plotUv.x, plotUv.y + hash12(vec2(floor(plotUv.x), 7.0))));
+    // A plot greens up over a short spell rather than all at once.
     float plot = hash12(plotId + 13.0);
     float sown = g * 0.75;
-    col = plot < sown ? ${rgb('#bcd98a')} : plot < sown + (1.0 - sown) * 0.55 ? ${rgb('#e3ad8b')} : ${rgb('#efdca9')};
+    float tilled = sown + (1.0 - sown) * 0.55;
+    col = mix(${rgb('#efdca9')}, ${rgb('#e3ad8b')}, smoothstep(tilled + 0.06, tilled - 0.06, plot));
+    col = mix(col, ${rgb('#bcd98a')}, smoothstep(sown + 0.06, sown - 0.06, plot));
   } else if (pick < grass + shrub + crop + wet) {
     col = mix(${rgb('#c1d6a1')}, ${rgb('#93c08a')}, 0.4 + 0.6 * g);
   }
