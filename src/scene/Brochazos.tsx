@@ -189,6 +189,12 @@ varying vec2 vWorld;
 
 const float PI = 3.14159265359;
 
+// Which way the brush runs at xz: a painter works a patch at a time, so neighbouring Brochazos
+// lie roughly the same way and only drift from it a little.
+float brushAngle(vec2 xz, vec2 id) {
+  return (tnoise(xz * 0.12 + 40.0) * 0.8 + tnoise(xz * 0.4 - 17.0) * 0.2) * 1.6 * PI + (hash12(id + 13.1) - 0.5) * 0.5;
+}
+
 vec4 cellOf(sampler2D cells, vec2 id) {
   vec2 texel = id - CELLS_MIN;
   if (any(lessThan(texel, vec2(0.0))) || any(greaterThanEqual(texel, CELLS_SIZE))) return vec4(0.0);
@@ -229,10 +235,11 @@ void main() {
       vec4 s = cellOf(uSuelo, id);
       if (s.a < 0.1) continue;
       bool water = s.a > 0.4;
-      float angle = water ? (s.a - 0.5) * 4.0 * PI : hash12(id + 13.1) * PI;
-      float len = BROCHAZO_KM * mix(0.5, 0.68, hash12(id + 2.9)) * (water ? 1.2 : 1.0);
-      float wide = len * mix(0.5, 0.75, hash12(id + 8.3));
-      float a = dab(xz, brochazoAt(id), angle, vec2(len, wide), id, fw);
+      vec2 at = brochazoAt(id);
+      float angle = water ? (s.a - 0.5) * 4.0 * PI : brushAngle(at, id);
+      float len = BROCHAZO_KM * mix(0.62, 0.8, hash12(id + 2.9));
+      float wide = len * mix(0.38, 0.55, hash12(id + 8.3));
+      float a = dab(xz, at, angle, vec2(len, wide), id, fw);
       if (a <= 0.0) continue;
       col = mix(col, manchaOver(srgb(s.rgb), id), a);
     }
@@ -244,8 +251,8 @@ void main() {
       vec4 s = cellOf(uVegetacion, id);
       if (s.a < 0.5) continue;
       vec2 at = vegetacionAt(id);
-      float len = BROCHAZO_KM * mix(0.48, 0.65, hash12(id + 4.7));
-      float a = dab(xz, at, hash12(id + 17.3) * PI, vec2(len, len * mix(0.6, 0.85, hash12(id + 6.1))), id + 0.5, fw);
+      float len = BROCHAZO_KM * mix(0.52, 0.7, hash12(id + 4.7));
+      float a = dab(xz, at, brushAngle(at, id + 0.5), vec2(len, len * mix(0.45, 0.65, hash12(id + 6.1))), id + 0.5, fw);
       if (a <= 0.0) continue;
       col = mix(col, manchaOver(srgb(s.rgb), floor(at / BROCHAZO_KM)), a);
     }
