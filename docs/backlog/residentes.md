@@ -2,6 +2,8 @@
 
 Status: needs-triage
 
+> El Mapa pasó a 2D, pintado con Brochazos: lo decidido aquí suponía animales dibujados en 3D y hay que repensarlo.
+
 ## Problema
 
 Los Residentes se dibujaron con la primera versión de la Manada y se quitaron para centrar el trabajo en que la Manada se mueva de forma orgánica. Hay que volver a ponerlos.
