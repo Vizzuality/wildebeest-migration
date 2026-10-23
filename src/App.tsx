@@ -1,6 +1,5 @@
 import { Canvas } from '@react-three/fiber'
 import { Suspense, useEffect } from 'react'
-import * as THREE from 'three'
 import { useFauna } from './fauna'
 import { useLluvia } from './lluvia'
 import { Scene } from './scene/Scene'
@@ -15,12 +14,7 @@ function World() {
   useLluvia()
   return (
     <>
-      <Canvas
-        className="canvas"
-        dpr={[1, 2]}
-        camera={{ fov: 38, near: 0.5, far: 3000 }}
-        gl={{ antialias: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }}
-      >
+      <Canvas className="canvas" dpr={[1, 2]} orthographic flat camera={{ near: 1, far: 200 }} gl={{ antialias: false }}>
         <Scene />
       </Canvas>
       <Timeline />

@@ -9,18 +9,18 @@ const FIELD_H = Math.round((FIELD_W * (MAP.maxZ - MAP.minZ)) / (MAP.maxX - MAP.m
 /** Room in the uniform arrays; the bake has nine rivers. */
 const MAX_RIVERS = 16
 
-/** Real half-width of the Lecho (km), and the narrowest it may get on screen (pixels across). */
-const LECHO: Record<RiverLine['kind'], { half: number; minPx: number }> = {
-  main: { half: 0.05, minPx: 1.5 },
-  tributary: { half: 0.02, minPx: 1.0 },
-}
+/**
+ * Half-width of the Lecho as painted (km). A real one is ~50 m, far under a Brochazo, so it is
+ * drawn as wide as a chain of them: a Río principal about two across, an Afluente about one, so it
+ * gets fewer.
+ */
+const LECHO: Record<RiverLine['kind'], number> = { main: 0.9, tributary: 0.5 }
 
 export const riverUniforms = {
   uRiverField: { value: null as THREE.Texture | null },
   uRiverFieldSize: { value: new THREE.Vector2(FIELD_W, FIELD_H) },
   uRiverStage: { value: new Array<number>(MAX_RIVERS).fill(0) },
   uRiverHalf: { value: new Array<number>(MAX_RIVERS).fill(0) },
-  uRiverMinPx: { value: new Array<number>(MAX_RIVERS).fill(1) },
   uRiverMain: { value: new Array<number>(MAX_RIVERS).fill(0) },
 }
 
@@ -131,8 +131,7 @@ export function bakeRiverField(gl: THREE.WebGLRenderer, rivers: RiverLine[], hei
 
   const kinds = names.map((n) => rivers.find((r) => r.name === n)!.kind)
   kinds.forEach((kind, i) => {
-    riverUniforms.uRiverHalf.value[i] = LECHO[kind].half
-    riverUniforms.uRiverMinPx.value[i] = LECHO[kind].minPx
+    riverUniforms.uRiverHalf.value[i] = LECHO[kind]
     riverUniforms.uRiverMain.value[i] = kind === 'main' ? 1 : 0
   })
   riverUniforms.uRiverField.value = target.texture
@@ -153,14 +152,13 @@ uniform sampler2D uRiverField;
 uniform vec2 uRiverFieldSize;
 uniform float uRiverStage[${MAX_RIVERS}];
 uniform float uRiverHalf[${MAX_RIVERS}];
-uniform float uRiverMinPx[${MAX_RIVERS}];
 uniform float uRiverMain[${MAX_RIVERS}];
 
-struct River { float lecho; float water; float stage; float main; vec2 flow; };
+struct River { bool lecho; bool water; float stage; float main; vec2 flow; };
 
-// Lecho and water cover (0–1) at a point, and where the water runs. fw is the pixel size in km.
-River riverAt(vec2 xz, float fw) {
-  River r = River(0.0, 0.0, 0.0, 0.0, vec2(0.0));
+// Whether a point is on a Lecho and in its water, and where the water runs.
+River riverAt(vec2 xz) {
+  River r = River(false, false, 0.0, 0.0, vec2(0.0));
   vec2 uv = (xz - vec2(${MAP.minX.toFixed(1)}, ${MAP.minZ.toFixed(1)})) /
     vec2(${(MAP.maxX - MAP.minX).toFixed(1)}, ${(MAP.maxZ - MAP.minZ).toFixed(1)});
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return r;
@@ -172,21 +170,18 @@ River riverAt(vec2 xz, float fw) {
 
   int id = int(texelFetch(uRiverField, ivec2(min(uv * uRiverFieldSize, uRiverFieldSize - 1.0)), 0).b * ${MAX_RIVERS.toFixed(1)});
   float s = uRiverStage[id];
-  // fw is the length of the footprint's diagonal, about 1.4 pixels.
-  float px = fw * 0.7;
-  float bed = max(uRiverHalf[id], uRiverMinPx[id] * px * 0.5);
-  float aa = px * 0.5;
-  r.lecho = 1.0 - smoothstep(bed - aa, bed + aa, d);
-  if (r.lecho <= 0.0) return r;
+  float bed = uRiverHalf[id];
+  r.lecho = d < bed;
+  if (!r.lecho) return r;
 
   // From bajo up the water runs unbroken and widens to fill the Lecho in crecida.
   float runs = smoothstep(0.42, 0.6, s);
-  float wide = mix(0.35, 1.0, smoothstep(0.55, 1.0, s));
+  float wide = mix(0.7, 1.0, smoothstep(0.55, 1.0, s));
   // Below that it only stands in Pozas, always in the same reaches, fewer as it dries.
   float pool = tnoise(xz * 1.4 + 17.0) * 0.6 + tnoise(xz * 4.1 - 9.0) * 0.4;
   float pools = smoothstep(0.0, 0.08, pool - mix(0.9, 0.0, smoothstep(0.02, 0.35, s)));
   float waterHalf = bed * max(wide * runs, 0.6 * pools);
-  r.water = (1.0 - smoothstep(waterHalf - aa, waterHalf + aa, d)) * step(0.001, waterHalf);
+  r.water = d < waterHalf;
 
   float a = (f.a - 0.5) * 6.28318530718;
   r.flow = vec2(cos(a), sin(a));

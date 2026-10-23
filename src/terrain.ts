@@ -1,9 +1,7 @@
 import { use } from 'react'
 import * as THREE from 'three'
 import { MAP } from './geo'
-import type { ReliefJob } from './relief.worker.ts'
-import ReliefWorker from './relief.worker.ts?worker'
-import { SUN_DIR, shared } from './shaders/common'
+import { shared } from './shaders/common'
 
 // Seeded PRNG so the landscape is identical on every load.
 export function mulberry32(seed: number) {
@@ -17,7 +15,8 @@ export function mulberry32(seed: number) {
   }
 }
 
-// Tuned by eye: enough to read the Ngorongoro highlands and the escarpments without caricature.
+// The Relieve is no longer drawn, but how steep the Mancha finds the ground was tuned on heights
+// scaled by this.
 export const EXAGGERATION = 2
 
 export type RiverKind = 'main' | 'tributary'
@@ -59,8 +58,6 @@ export interface Heightfield {
   verdor: Uint8Array
   /** Usual month of each cell's Quema (1–12, 0 = none). */
   quemas: Uint8Array
-  /** Ground normals at `detail`× the grid's resolution: half-float x, z per cell. */
-  normals: Uint16Array
   detail: number
   rivers: RiverLine[]
   heightAt: (x: number, z: number) => number
@@ -76,34 +73,14 @@ function toHeights(meta: TerrainMeta, elevation: ArrayBuffer) {
   return Float32Array.from(new Uint16Array(elevation), (v) => ((v / 10 - meta.base) / 1000) * EXAGGERATION)
 }
 
-/** Bakes shadows and normals off the main thread, so they overlap the rest of the downloads. */
-function reliefInWorker(heights: Float32Array, detail: Int8Array, { nx, nz, step, detail: scale, detailUnit }: TerrainMeta) {
-  return new Promise<{ relief: Uint8Array; normals: Uint16Array }>((resolve, reject) => {
-    const worker = new ReliefWorker()
-    worker.onmessage = (e: MessageEvent<{ relief: Uint8Array; normals: Uint16Array }>) => {
-      resolve(e.data)
-      worker.terminate()
-    }
-    worker.onerror = (e) => {
-      reject(new Error(`relief worker: ${e.message}`))
-      worker.terminate()
-    }
-    const sun = SUN_DIR.toArray() as [number, number, number]
-    const job: ReliefJob = { heights, nx, nz, step, sun, detail, scale, rise: (detailUnit / 1000) * EXAGGERATION }
-    worker.postMessage(job)
-  })
-}
-
 async function fetchHeightfield(): Promise<Heightfield> {
   const metaP = fetchOk('/terrain/terrain.json').then((r) => r.json() as Promise<TerrainMeta>)
   const heightsP = Promise.all([metaP, fetchOk('/terrain/elevation.bin').then((r) => r.arrayBuffer())]).then(([meta, elevation]) =>
     toHeights(meta, elevation),
   )
-  const detailP = fetchOk('/terrain/detail.bin').then((r) => r.arrayBuffer())
-  const [meta, heights, { relief, normals }, rawMasks, rawCover, rawCrops, rawVerdor, rawQuemas, rawCoverDetail, rawCropsDetail] = await Promise.all([
+  const [meta, heights, rawMasks, rawCover, rawCrops, rawVerdor, rawQuemas, rawCoverDetail, rawCropsDetail] = await Promise.all([
     metaP,
     heightsP,
-    Promise.all([heightsP, detailP, metaP]).then(([h, detail, meta]) => reliefInWorker(h, new Int8Array(detail), meta)),
     fetchOk('/terrain/masks.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/cover.bin').then((r) => r.arrayBuffer()),
     fetchOk('/terrain/crops.bin').then((r) => r.arrayBuffer()),
@@ -136,11 +113,10 @@ async function fetchHeightfield(): Promise<Heightfield> {
   shared.uVerdor.value = verdorTextures(verdor, nx, nz)
   shared.uQuemas.value = quemasTexture(quemas, nx, nz)
   shared.uQuemaMask.value = quemaMaskTexture(quemas, nx, nz)
-  shared.uRelief.value = reliefTexture(relief, (nx - 1) * meta.detail + 1, (nz - 1) * meta.detail + 1)
 
   const coverDetail = new Uint8Array(rawCoverDetail)
   const cropsDetail = new Uint8Array(rawCropsDetail)
-  const hf = { nx, nz, step, heights, cover, crops, coverDetail, cropsDetail, verdor, quemas, masks, normals, detail: meta.detail }
+  const hf = { nx, nz, step, heights, cover, crops, coverDetail, cropsDetail, verdor, quemas, masks, detail: meta.detail }
   return {
     ...hf,
     rivers: meta.rivers.flatMap((r) => r.lines.map((points) => ({ name: r.name, kind: r.kind, points }))),
@@ -168,13 +144,6 @@ function verdorTextures(verdor: Uint8Array, nx: number, nz: number) {
     for (let i = 0; i < nx * nz; i++) for (let c = 0; c < 4; c++) data[i * 4 + c] = verdor[i * 12 + k * 4 + c]
     return mipmapped(new THREE.DataTexture(data, nx, nz, THREE.RGBAFormat))
   })
-}
-
-/** Per detail cell: sun past the Relieve (R) and open sky (G), from bakeRelief. */
-function reliefTexture(relief: Uint8Array, nx: number, nz: number) {
-  const tex = new THREE.DataTexture(relief, nx, nz, THREE.RGFormat)
-  tex.unpackAlignment = 2
-  return mipmapped(tex)
 }
 
 /** Usual month of each cell's Quema (1–12, 0 = none). Nearest filtering: months don't blend. */

@@ -1,18 +1,16 @@
 import { useFrame, useThree } from '@react-three/fiber'
-import { Bloom, EffectComposer, Noise, ToneMapping, Vignette } from '@react-three/postprocessing'
-import { ToneMappingMode } from 'postprocessing'
+import { useLayoutEffect } from 'react'
+import * as THREE from 'three'
+import { MAP } from '../geo'
 import { MONTHS_PER_SECOND, useStore } from '../store'
 import { shared } from '../shaders/common'
-import { CameraRig } from './CameraRig'
-import { Corte } from './Corte'
-import { Meteoros } from './Meteoros'
+import { Brochazos } from './Brochazos'
+import { Fauna } from './Fauna'
 import { Border, Labels } from './Overlays'
 import { Rivers } from './Rivers'
-import { Sharpen } from './Sharpen'
-import { Sky } from './Sky'
-import { Terrain } from './Terrain'
-import { Groves } from './Groves'
-import { Fauna } from './Fauna'
+
+/** Screen kept clear at the bottom for the timeline (px). */
+const TIMELINE_PX = 88
 
 function Clock() {
   useFrame((_, dt) => {
@@ -28,31 +26,33 @@ function Clock() {
   return null
 }
 
+/** The whole Mapa, straight from above with north up, fitted above the timeline. */
+function Encuadre() {
+  const camera = useThree((s) => s.camera) as THREE.OrthographicCamera
+  const { width, height } = useThree((s) => s.size)
+  useLayoutEffect(() => {
+    const room = Math.max(1, height - TIMELINE_PX)
+    camera.zoom = Math.min(width / (MAP.maxX - MAP.minX), room / (MAP.maxZ - MAP.minZ))
+    const x = (MAP.minX + MAP.maxX) / 2
+    const z = (MAP.minZ + MAP.maxZ) / 2 + TIMELINE_PX / 2 / camera.zoom
+    camera.up.set(0, 0, -1)
+    camera.position.set(x, 100, z)
+    camera.lookAt(x, 0, z)
+    camera.updateProjectionMatrix()
+  }, [camera, width, height])
+  return null
+}
+
 export function Scene() {
-  // On high-density screens the extra pixels already smooth edges; MSAA there cost ~11 ms a frame.
-  const dpr = useThree((s) => s.viewport.dpr)
   return (
     <>
       <Clock />
-      <hemisphereLight args={['#b9c7d8', '#6b5a3f', 1.1]} />
-      <directionalLight position={[-62, 55, 56]} intensity={2.4} color="#ffdcae" />
-      <Sky />
-      <Terrain />
-      <Corte />
+      <Encuadre />
       <Rivers />
-      <Groves />
       <Fauna />
+      <Brochazos />
       <Border />
       <Labels />
-      <CameraRig />
-      <EffectComposer multisampling={dpr >= 1.5 ? 0 : 4}>
-        <Sharpen />
-        <Meteoros />
-        <Bloom intensity={0.55} luminanceThreshold={0.82} mipmapBlur />
-        <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
-        <Noise opacity={0.035} />
-        <Vignette offset={0.28} darkness={0.62} />
-      </EffectComposer>
     </>
   )
 }
