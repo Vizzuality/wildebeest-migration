@@ -201,24 +201,31 @@ vec4 cellOf(sampler2D cells, vec2 id) {
   return texelFetch(cells, ivec2(texel), 0);
 }
 
-// How much of a Brochazo lies over p: a dab long along its angle, its rim ragged.
-float dab(vec2 p, vec2 c, float angle, vec2 size, vec2 id, float fw) {
+// How much of a Brochazo lies over p: a dab long along its angle, its rim ragged. along is how far
+// p is along it, 0 at its start and 1 at its end.
+float dab(vec2 p, vec2 c, float angle, vec2 size, vec2 id, float fw, out float along) {
   vec2 d = p - c;
   float ca = cos(angle);
   float sa = sin(angle);
-  float r = length(vec2(ca * d.x + sa * d.y, ca * d.y - sa * d.x) / size);
+  vec2 q = vec2(ca * d.x + sa * d.y, ca * d.y - sa * d.x) / size;
+  along = q.x * 0.5 + 0.5;
+  float r = length(q);
   if (r > 1.3) return 0.0;
   float rag = tnoise(p * 2.5 + id * 3.1) * 0.12 + tnoise(p * 6.0 - id) * 0.06;
   float aa = 0.7 * fw / size.y;
   return 1.0 - smoothstep(1.0 - aa, 1.0 + aa, r + rag);
 }
 
-// The Mancha does not change a Brochazo, it repaints it in the colour of its species.
-vec3 manchaOver(vec3 col, vec2 cell) {
+// The Mancha does not change a Brochazo, it repaints it in the colour of its species, over as
+// much of its length as the brush has swept. The brush's front is ragged across the stroke.
+vec3 manchaOver(vec3 col, vec2 cell, float along, vec2 p) {
   vec4 m = cellOf(uMancha, cell);
-  if (m.r < 0.5) return col;
-  vec3 kinds = m.gba;
-  return (uEspecies[0] * kinds.x + uEspecies[1] * kinds.y + uEspecies[2] * kinds.z) / max(kinds.x + kinds.y + kinds.z, 1e-3);
+  if (m.g <= 0.0) return col;
+  vec3 kinds = vec3(m.ba, max(1.0 - m.b - m.a, 0.0));
+  vec3 species = (uEspecies[0] * kinds.x + uEspecies[1] * kinds.y + uEspecies[2] * kinds.z) / max(kinds.x + kinds.y + kinds.z, 1e-3);
+  float s = along + tnoise(p * 9.0 + cell) * 0.12;
+  float swept = smoothstep(m.r - 0.08, m.r + 0.08, s) * (1.0 - smoothstep(m.g - 0.08, m.g + 0.08, s));
+  return mix(col, species, swept);
 }
 
 void main() {
@@ -239,9 +246,10 @@ void main() {
       float angle = water ? (s.a - 0.5) * 4.0 * PI : brushAngle(at, id);
       float len = BROCHAZO_KM * mix(0.62, 0.8, hash12(id + 2.9));
       float wide = len * mix(0.38, 0.55, hash12(id + 8.3));
-      float a = dab(xz, at, angle, vec2(len, wide), id, fw);
+      float along;
+      float a = dab(xz, at, angle, vec2(len, wide), id, fw, along);
       if (a <= 0.0) continue;
-      col = mix(col, manchaOver(srgb(s.rgb), id), a);
+      col = mix(col, manchaOver(srgb(s.rgb), id, along, xz), a);
     }
   }
   cell = floor(xz / BROCHAZO_KM - 0.5);
@@ -252,9 +260,10 @@ void main() {
       if (s.a < 0.5) continue;
       vec2 at = vegetacionAt(id);
       float len = BROCHAZO_KM * mix(0.52, 0.7, hash12(id + 4.7));
-      float a = dab(xz, at, brushAngle(at, id + 0.5), vec2(len, len * mix(0.45, 0.65, hash12(id + 6.1))), id + 0.5, fw);
+      float along;
+      float a = dab(xz, at, brushAngle(at, id + 0.5), vec2(len, len * mix(0.45, 0.65, hash12(id + 6.1))), id + 0.5, fw, along);
       if (a <= 0.0) continue;
-      col = mix(col, manchaOver(srgb(s.rgb), floor(at / BROCHAZO_KM)), a);
+      col = mix(col, manchaOver(srgb(s.rgb), floor(at / BROCHAZO_KM), along, xz), a);
     }
   }
 

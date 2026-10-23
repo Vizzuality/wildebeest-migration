@@ -257,8 +257,14 @@ const uniforms = {
   uChainBank: { value: Array.from({ length: SLOTS * CHAIN_POINTS }, () => 0) },
 }
 
-/** Per Brochazo cell of the Mapa: whether the Mancha has it (r) and which species it goes to (gba). */
+/**
+ * Per Brochazo cell of the Mapa, how much of it the Mancha has painted: its colour runs along the
+ * Brochazo from r to g (0 its start, 1 its end), and it goes to the species b, a and what is left.
+ */
 export const mancha = { uMancha: { value: null as THREE.Texture | null } }
+
+/** How long (s) the brush takes to sweep the Mancha's colour along a Brochazo, or the ground's back over it. */
+const PAINT_SECONDS = 0.6
 
 const FIELD = /* glsl */ `
 ${GLSL_COMMON}
@@ -414,6 +420,30 @@ void main() {
     from = to;
   }
   gl_FragColor = vec4(1.0, kind[0], kind[1], kind[2]);
+}
+`
+
+/**
+ * The Mancha's colour is not swapped in, it is painted: on a Brochazo the Mancha takes, the brush
+ * sweeps it along from start to end; on one it leaves, the ground is swept back over it the same
+ * way. It keeps the species it was painted in until the ground has covered it.
+ */
+const paintFragment = /* glsl */ `
+${GLSL_COMMON}
+uniform sampler2D uTaken;
+uniform sampler2D uPainted;
+uniform float uStroke;
+void main() {
+  ivec2 texel = ivec2(gl_FragCoord.xy);
+  vec4 taken = texelFetch(uTaken, texel, 0);
+  vec4 was = texelFetch(uPainted, texel, 0);
+  float stroke = uStroke * mix(0.7, 1.3, hash12(gl_FragCoord.xy + 17.9));
+  if (taken.r > 0.5) {
+    gl_FragColor = vec4(max(was.r - stroke, 0.0), min(was.g + stroke, 1.0), taken.g, taken.b);
+    return;
+  }
+  float from = was.r + stroke;
+  gl_FragColor = from >= was.g ? vec4(0.0) : vec4(from, was.g, was.ba);
 }
 `
 
@@ -919,13 +949,31 @@ export function Fauna() {
   }, [ground, raw.ground])
 
   const cells = useMemo(() => new CellPass(stepFragment, { ...shared, ...uniforms }), [])
-  useEffect(() => () => cells.dispose(), [cells])
+  // Each frame paints from the last one's, so two passes take turns reading and drawing.
+  const paint = useMemo(() => {
+    const stroke = { value: 0 }
+    const a = new CellPass(paintFragment, { ...shared, uTaken: { value: cells.texture }, uPainted: { value: null }, uStroke: stroke })
+    const b = new CellPass(paintFragment, { ...shared, uTaken: { value: cells.texture }, uPainted: { value: a.texture }, uStroke: stroke })
+    a.uniforms.uPainted.value = b.texture
+    return { passes: [a, b], stroke, turn: 0 }
+  }, [cells])
+  useEffect(
+    () => () => {
+      cells.dispose()
+      paint.passes.forEach((p) => p.dispose())
+    },
+    [cells, paint],
+  )
 
-  useFrame(({ gl }) => {
+  useFrame(({ gl }, dt) => {
     const month = useStore.getState().month
     cover(ways.map((way, k) => place(way, raw.ground, all, month + ESPECIES[k].ahead, month, k)))
     cells.draw(gl)
-    mancha.uMancha.value = cells.texture
+    paint.stroke.value = Math.min(dt, 0.1) / PAINT_SECONDS
+    paint.turn ^= 1
+    const pass = paint.passes[paint.turn]
+    pass.draw(gl)
+    mancha.uMancha.value = pass.texture
   })
 
   return SHOW_RECORRIDO ? <RecorridoLine bake={bake} /> : null

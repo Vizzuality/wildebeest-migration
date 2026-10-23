@@ -64,10 +64,12 @@ export class CellPass {
     depthBuffer: false,
   })
   private readonly material: THREE.ShaderMaterial
+  readonly uniforms: Record<string, THREE.IUniform>
   private readonly quad: THREE.Mesh
   private readonly camera = new THREE.OrthographicCamera()
 
   constructor(fragmentShader: string, uniforms: Record<string, THREE.IUniform>) {
+    this.uniforms = uniforms
     this.material = new THREE.ShaderMaterial({ vertexShader: cellVertex, fragmentShader: NO_DERIVATIVES + fragmentShader, uniforms })
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.material)
   }
