@@ -123,7 +123,8 @@ void main() {
       float rag = tnoise(xz * 1.7 + 5.0) * 0.6 + tnoise(xz * 5.3) * 0.4;
       float scar = burnScar(bent, rag);
       vec3 burnt = mix(${rgb('#5f5751')}, ${rgb('#b8aea2')}, smoothstep(0.1, 1.2, age));
-      float raw = 0.85 * (1.0 - smoothstep(0.6, 3.5, age)) * (1.0 - g);
+      // The fire takes a few days to burn across a spot, so the scar darkens in rather than appearing.
+      float raw = 0.85 * smoothstep(0.0, 0.1, age) * (1.0 - smoothstep(0.6, 3.5, age)) * (1.0 - g);
       col = mix(col, burnt, scar * raw);
       col = mix(col, ${rgb('#a3d283')}, scar * g * 0.5 * (1.0 - smoothstep(4.0, 8.0, age)));
     }
