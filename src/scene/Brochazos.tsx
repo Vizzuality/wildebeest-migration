@@ -235,6 +235,15 @@ vec3 laid(vec3 col, float paint, vec4 top) {
   return mix(col, top.rgb, smoothstep(FUSE - edge, FUSE + edge, paint));
 }
 
+// Broken colour, as Seurat laid it: each Brochazo takes a purer, warmer, cooler or lighter take on
+// the colour under it, and they only mix back into that colour in the eye of whoever looks.
+vec3 broken(vec3 col, vec2 id) {
+  float pick = hash12(id + 91.7);
+  vec3 tint = pick < 0.25 ? vec3(1.25, 1.1, 0.6) : pick < 0.5 ? vec3(0.8, 0.9, 1.45) : pick < 0.75 ? vec3(1.18) : vec3(0.82);
+  vec3 pure = mix(vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), col, 1.15);
+  return max(pure * tint, 0.0);
+}
+
 // The Mancha does not change a Brochazo, it repaints it in the colour of its species, over as
 // much of its length as the brush has swept. The brush's front is ragged across the stroke.
 vec3 manchaOver(vec3 col, vec2 cell, float along, vec2 p) {
@@ -269,7 +278,7 @@ void main() {
       float a = dab(xz, at, angle, vec2(len, wide), id, along);
       if (a <= 0.0) continue;
       paint += a;
-      if (a > top.a) top = vec4(manchaOver(srgb(s.rgb), id, along, xz), a);
+      if (a > top.a) top = vec4(broken(manchaOver(srgb(s.rgb), id, along, xz), id), a);
     }
   }
   col = laid(col, paint, top);
@@ -287,7 +296,7 @@ void main() {
       float a = dab(xz, at, brushAngle(at, id + 0.5), vec2(len, len * mix(0.45, 0.65, hash12(id + 6.1))), id + 0.5, along);
       if (a <= 0.0) continue;
       paint += a;
-      if (a > top.a) top = vec4(manchaOver(srgb(s.rgb), floor(at / BROCHAZO_KM), along, xz), a);
+      if (a > top.a) top = vec4(broken(manchaOver(srgb(s.rgb), floor(at / BROCHAZO_KM), along, xz), id + 0.5), a);
     }
   }
   col = laid(col, paint, top);
