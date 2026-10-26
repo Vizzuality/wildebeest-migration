@@ -7,6 +7,7 @@ import { useStore } from './store'
 import { useHeightfield } from './terrain'
 import { Curtain, TerrainErrorBoundary } from './ui/Curtain'
 import { Timeline } from './ui/Timeline'
+import { Tweaks } from './ui/Tweaks'
 
 function World() {
   useHeightfield()
@@ -18,6 +19,7 @@ function World() {
         <Scene />
       </Canvas>
       <Timeline />
+      <Tweaks />
       <Curtain leaving />
     </>
   )
