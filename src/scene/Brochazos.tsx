@@ -215,6 +215,13 @@ ${steps}
 /** How much steeper than the DEM the light reads the slopes, and how far it moves the colour. */
 const RELIEF_GAIN = 5
 const RELIEF_DEPTH = 0.6
+/**
+ * The margin of bare paper inside the Mapa's edge (km): none of it painted for EDGE_BARE_KM, thinning
+ * in over EDGE_FADE_KM, its line bitten in and out by up to EDGE_RAG_KM.
+ */
+const EDGE_BARE_KM = 6
+const EDGE_FADE_KM = 14
+const EDGE_RAG_KM = 9
 /** Half the length of a Brochazo (km): longer than half the spacing, so a row of them joins up. */
 const STROKE_KM = 1.05
 
@@ -241,6 +248,8 @@ uniform sampler2D uMancha;
 uniform vec3 uEspecies[${ESPECIES.length}];
 
 const vec3 PAPER = ${rgb(DESIGN_PAPER)};
+const vec2 MAP_MIN = vec2(${MAP.minX.toFixed(1)}, ${MAP.minZ.toFixed(1)});
+const vec2 MAP_MAX = vec2(${MAP.maxX.toFixed(1)}, ${MAP.maxZ.toFixed(1)});
 const float RELIEF_GAIN = ${RELIEF_GAIN.toFixed(1)};
 const float RELIEF_DEPTH = ${RELIEF_DEPTH.toFixed(2)};
 
@@ -274,8 +283,11 @@ bool swept(vec2 id, out vec3 species) {
 void main() {
   vec2 id = CELLS_MIN + floor(gl_FragCoord.xy);
   vec2 xz = brochazoAt(id);
-  // Towards the Bruma fewer Brochazos are laid, and those thin into the paper.
-  float bruma = painted(xz);
+  // Towards the Bruma fewer Brochazos are laid, and those thin into the paper. Whatever the Bruma
+  // keeps painted, nothing reaches the Mapa's own edge: a ragged margin of paper hides its square.
+  float inset = min(min(xz.x - MAP_MIN.x, MAP_MAX.x - xz.x), min(xz.y - MAP_MIN.y, MAP_MAX.y - xz.y));
+  inset += (tnoise(xz * 0.09 + 31.0) * 0.7 + tnoise(xz * 0.31 - 8.0) * 0.3) * ${EDGE_RAG_KM.toFixed(1)};
+  float bruma = painted(xz) * smoothstep(${EDGE_BARE_KM.toFixed(1)}, ${(EDGE_BARE_KM + EDGE_FADE_KM).toFixed(1)}, inset);
   if (hash12(id + 9.1) >= bruma) {
     gl_FragColor = vec4(0.0);
     return;
