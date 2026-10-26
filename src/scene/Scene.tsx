@@ -5,6 +5,7 @@ import { MAP } from '../geo'
 import { MONTHS_PER_SECOND, useStore } from '../store'
 import { shared } from '../shaders/common'
 import { Brochazos } from './Brochazos'
+import { Diseno } from './Diseno'
 import { Fauna } from './Fauna'
 import { Border, Labels } from './Overlays'
 import { Rivers } from './Rivers'
@@ -113,6 +114,11 @@ function Encuadre() {
   return null
 }
 
+function Cuadro() {
+  const fuente = useStore((s) => s.fuente)
+  return fuente === 'diseno' ? <Diseno /> : <Brochazos />
+}
+
 export function Scene() {
   return (
     <>
@@ -120,7 +126,7 @@ export function Scene() {
       <Encuadre />
       <Rivers />
       <Fauna />
-      <Brochazos />
+      <Cuadro />
       <Border />
       <Labels />
     </>

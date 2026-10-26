@@ -5,7 +5,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body, #root { margin: 0; height: 100%; overflow: hidden; background: #f5f0e3; }
+html, body, #root { margin: 0; height: 100%; overflow: hidden; background: hsl(41 47% 93%); }
 body { font-family: var(--sans); color: var(--ink); -webkit-font-smoothing: antialiased; }
 
 .canvas { position: fixed !important; inset: 0; }
