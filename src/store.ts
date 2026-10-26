@@ -4,11 +4,27 @@ import { create } from 'zustand'
 export const FUENTES = ['datos', 'diseno'] as const
 export type Fuente = (typeof FUENTES)[number]
 
+/**
+ * How the Lienzo lays each Brochazo: half its length (km), its width against the design's dots, how
+ * wide the brush's flow swirls (above 1, tighter), how far the flow turns, and its heading (degrees).
+ */
+export interface Trazo {
+  largo: number
+  grosor: number
+  escala: number
+  giro: number
+  direccion: number
+}
+
+// Largo 1.05 is longer than half the Brochazo spacing, so a row of them joins up.
+export const TRAZO: Trazo = { largo: 1.05, grosor: 1, escala: 1, giro: 1, direccion: 0 }
+
 interface State {
   month: number
   playing: boolean
   speed: number
   fuente: Fuente
+  trazo: Trazo
   set: (patch: Partial<Omit<State, 'set'>>) => void
 }
 
@@ -22,6 +38,7 @@ export const useStore = create<State>((set) => ({
   playing: !params.has('pausa'),
   speed: 1,
   fuente: startFuente,
+  trazo: TRAZO,
   set: (patch) => set(patch),
 }))
 

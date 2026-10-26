@@ -7,6 +7,7 @@ import { BROCHAZO_GLSL, CellPass } from '../shaders/brochazos'
 import { GLSL_COMMON, shared } from '../shaders/common'
 import { DESIGN_PAPER, DESIGN_RASTER } from '../shaders/figma'
 import { RIVER_GLSL, riverUniforms } from '../shaders/rivers'
+import { useStore } from '../store'
 import { mipmapped, useHeightfield, type Heightfield } from '../terrain'
 import { ESPECIES, mancha } from './Fauna'
 import { Lienzo } from './Lienzo'
@@ -233,9 +234,6 @@ const RELIEF_DEPTH = 0.6
 const EDGE_BARE_KM = 6
 const EDGE_FADE_KM = 14
 const EDGE_RAG_KM = 9
-/** Half the length of a Brochazo (km): longer than half the spacing, so a row of them joins up. */
-const STROKE_KM = 1.05
-
 const CELL_GLSL = /* glsl */ `
 vec4 cellOf(sampler2D cells, vec2 id) {
   vec2 texel = id - CELLS_MIN;
@@ -360,17 +358,22 @@ ${CELL_GLSL}
 uniform sampler2D uPinta;
 uniform sampler2D uEspecie;
 uniform sampler2D uMancha;
+uniform float uLargo;
+uniform float uGrosor;
+uniform float uEscala;
+uniform float uGiro;
+uniform float uDireccion;
 
 const vec3 PAPER = ${rgb(DESIGN_PAPER)};
 const vec2 MAP_MIN = vec2(${MAP.minX.toFixed(1)}, ${MAP.minZ.toFixed(1)});
 const vec2 MAP_SPAN = vec2(${(MAP.maxX - MAP.minX).toFixed(1)}, ${(MAP.maxZ - MAP.minZ).toFixed(1)});
-const float STROKE_KM = ${STROKE_KM.toFixed(3)};
 const vec2 RASTER = vec2(${DESIGN_RASTER.width.toFixed(1)}, ${DESIGN_RASTER.height.toFixed(1)});
 
 // Which way the brush runs at xz: one slow field over the whole picture, so strokes that lie side
 // by side run the same way and those in a row join end to end.
 float flow(vec2 xz) {
-  return (tnoise(xz * 0.04 + 40.0) * 0.7 + tnoise(xz * 0.13 - 17.0) * 0.3) * 3.14159;
+  vec2 p = xz * uEscala;
+  return uDireccion + (tnoise(p * 0.04 + 40.0) * 0.7 + tnoise(p * 0.13 - 17.0) * 0.3) * 3.14159 * uGiro;
 }
 
 // Each Brochazo an elongated stroke along the flow, longer than the spacing so a row of them runs
@@ -379,7 +382,8 @@ vec4 trazos(vec2 xz, float texel) {
   vec2 cell = floor(xz / BROCHAZO_KM);
   vec3 col = PAPER;
   float paint = 0.0;
-  // A stroke reaches past its neighbour's cell, so two rings of them can touch xz.
+  // A stroke reaches past its neighbour's cell, so two rings of them can touch xz (enough for the
+  // longest stroke the Tweaks allow).
   for (int j = -2; j <= 2; j++) {
     for (int i = -2; i <= 2; i++) {
       vec2 id = cell + vec2(float(i), float(j));
@@ -388,14 +392,15 @@ vec4 trazos(vec2 xz, float texel) {
       vec2 at = brochazoAt(id);
       float a = flow(at);
       vec2 d = xz - at;
-      vec2 q = vec2(cos(a) * d.x + sin(a) * d.y, cos(a) * d.y - sin(a) * d.x) / vec2(STROKE_KM, p.a);
-      float cover = clamp((1.0 - length(q)) * p.a / texel + 0.5, 0.0, 1.0);
+      float wide = p.a * uGrosor;
+      vec2 q = vec2(cos(a) * d.x + sin(a) * d.y, cos(a) * d.y - sin(a) * d.x) / vec2(uLargo, wide);
+      float cover = clamp((1.0 - length(q)) * wide / texel + 0.5, 0.0, 1.0);
       // The Mancha's colour runs along the stroke from its start, as far as its brush has swept.
       vec4 m = cellOf(uMancha, id);
       vec3 stroke = p.rgb;
       if (m.g > m.r) {
         float along = q.x * 0.5 + 0.5;
-        float edge = texel / (2.0 * STROKE_KM);
+        float edge = texel / (2.0 * uLargo);
         float swept = smoothstep(m.r - edge, m.r + edge, along) * (1.0 - smoothstep(m.g - edge, m.g + edge, along));
         stroke = mix(stroke, cellOf(uEspecie, id).rgb, swept);
       }
@@ -467,12 +472,35 @@ export function Brochazos() {
       uShore,
       uEspecies: { value: ESPECIES.map((e) => srgb(e.color)) },
     })
-    const raster = new CellPass(lienzoFragment, { ...shared, ...mancha, uPinta: { value: pinta.texture }, uEspecie: { value: especie.texture } }, DESIGN_RASTER)
+    const raster = new CellPass(
+      lienzoFragment,
+      {
+        ...shared,
+        ...mancha,
+        uPinta: { value: pinta.texture },
+        uEspecie: { value: especie.texture },
+        uLargo: { value: 0 },
+        uGrosor: { value: 0 },
+        uEscala: { value: 0 },
+        uGiro: { value: 0 },
+        uDireccion: { value: 0 },
+      },
+      DESIGN_RASTER,
+    )
     return [suelo, vegetacion, agua, pinta, especie, raster]
   }, [hf])
   useEffect(() => () => passes.forEach((p) => p.dispose()), [passes])
 
-  useFrame(({ gl }) => passes.forEach((p) => p.draw(gl)))
+  useFrame(({ gl }) => {
+    const { largo, grosor, escala, giro, direccion } = useStore.getState().trazo
+    const u = passes[passes.length - 1].uniforms
+    u.uLargo.value = largo
+    u.uGrosor.value = grosor
+    u.uEscala.value = escala
+    u.uGiro.value = giro
+    u.uDireccion.value = (direccion * Math.PI) / 180
+    passes.forEach((p) => p.draw(gl))
+  })
 
   return <Lienzo raster={passes[passes.length - 1].texture} />
 }
