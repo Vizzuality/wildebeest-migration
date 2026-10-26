@@ -48,7 +48,8 @@ void main() {
 
 /**
  * A picture worked out afresh every frame from the moment of the year alone, one texel per
- * Brochazo unless told another size. The fragment shader finds its Brochazo as
+ * Brochazo unless told another size. Kept in half floats: the palette ramps read colours along
+ * steep axes, so 8-bit steps came out as visible jolts while the Verdor or the water changed. The fragment shader finds its Brochazo as
  * `CELLS_MIN + floor(gl_FragCoord.xy)`.
  */
 export class CellPass {
@@ -65,11 +66,13 @@ export class CellPass {
           minFilter: THREE.LinearMipmapLinearFilter,
           magFilter: THREE.NearestFilter,
           generateMipmaps: true,
+          type: THREE.HalfFloatType,
           depthBuffer: false,
         })
       : new THREE.WebGLRenderTarget(CELLS.nx, CELLS.nz, {
           minFilter: THREE.NearestFilter,
           magFilter: THREE.NearestFilter,
+          type: THREE.HalfFloatType,
           depthBuffer: false,
         })
     this.uniforms = uniforms
