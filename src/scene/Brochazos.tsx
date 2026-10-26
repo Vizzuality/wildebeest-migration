@@ -38,7 +38,7 @@ float orderAt(vec2 xz) {
 }
 `
 
-/** The ground: rgb its colour, a what it is (0.25 land, 0.5 water). */
+/** The ground: rgb its colour, with the Lecho bare; the water over it is the Agua's. */
 const sueloFragment = /* glsl */ `
 ${PASS_HEAD}
 ${RIVER_GLSL}
@@ -105,22 +105,33 @@ void main() {
   col = mix(col, fresh, smoothstep(9.0, 7.0, distance(xz, uCrater)) * 0.4);
   if (distance(xz, uCraterLake) < 1.8) col = ${rgb('#f3e8e3')};
 
-  // Rivers: pale Lecho, water while it runs and greyer once it stands in Pozas.
-  float what = 0.25;
-  River river = riverAt(xz);
-  if (river.lecho) {
-    vec3 runs = mix(${rgb('#5b9bdb')}, ${rgb('#7fb3e6')}, shade);
-    vec3 water = mix(${rgb('#86a9c4')}, runs, smoothstep(0.3, 0.6, river.stage));
-    col = mix(mix(${rgb('#ecdcbd')}, ${rgb('#e2cfae')}, shade), water, river.water);
-    if (river.water > 0.5) what = 0.5;
-  }
+  // Rivers: the pale Lecho, whatever water lies on it.
+  if (riverAt(xz).lecho) col = mix(${rgb('#ecdcbd')}, ${rgb('#e2cfae')}, shade);
 
+  gl_FragColor = vec4(col, 1.0);
+}
+`
+
+/**
+ * The water: rgb its colour, a how much of the Brochazo it covers, so the paint turns from the
+ * Lecho's to the water's as a river rises over it rather than at once.
+ */
+const aguaFragment = /* glsl */ `
+${PASS_HEAD}
+${RIVER_GLSL}
+
+void main() {
+  vec2 id = CELLS_MIN + floor(gl_FragCoord.xy);
+  vec2 xz = brochazoAt(id);
+  float shade = 0.5 + 0.5 * tnoise(xz * 0.12 + 7.0);
   if (texture2D(uLake, gridUv(xz)).r > 0.5) {
-    col = mix(${rgb('#5f9bd6')}, ${rgb('#8cbbe7')}, shade);
-    what = 0.5;
+    gl_FragColor = vec4(mix(${rgb('#5f9bd6')}, ${rgb('#8cbbe7')}, shade), 1.0);
+    return;
   }
-
-  gl_FragColor = vec4(col, what);
+  // Water while it runs, greyer once it stands in Pozas.
+  River river = riverAt(xz);
+  vec3 runs = mix(${rgb('#5b9bdb')}, ${rgb('#7fb3e6')}, shade);
+  gl_FragColor = vec4(mix(${rgb('#86a9c4')}, runs, smoothstep(0.3, 0.6, river.stage)), river.water);
 }
 `
 
@@ -233,29 +244,18 @@ vec4 cellOf(sampler2D cells, vec2 id) {
 }
 `
 
-/**
- * Each Brochazo as the design would paint it, worked out once a frame: rgb its colour, lit by the
- * Relieve and repainted by the Mancha, a how wide its paint lies (km).
- */
-const pintaFragment = /* glsl */ `
+/** The light and the Bruma a Brochazo's paint is laid in, whoever's paint it is. */
+const LUZ_GLSL = /* glsl */ `
 ${GLSL_COMMON}
 ${BROCHAZO_GLSL}
 ${BRUMA_GLSL}
 ${CELL_GLSL}
-uniform sampler2D uSuelo;
-uniform sampler2D uVegetacion;
-uniform sampler2D uMancha;
-uniform vec3 uEspecies[${ESPECIES.length}];
 
 const vec3 PAPER = ${rgb(DESIGN_PAPER)};
 const vec2 MAP_MIN = vec2(${MAP.minX.toFixed(1)}, ${MAP.minZ.toFixed(1)});
 const vec2 MAP_MAX = vec2(${MAP.maxX.toFixed(1)}, ${MAP.maxZ.toFixed(1)});
 const float RELIEF_GAIN = ${RELIEF_GAIN.toFixed(1)};
 const float RELIEF_DEPTH = ${RELIEF_DEPTH.toFixed(2)};
-
-${rampGlsl('groundDot', '(c.r - c.g) * 255.0', RAMPS.ground)}
-${rampGlsl('treeDot', 'dot(c, vec3(0.2126, 0.7152, 0.0722)) * 255.0', RAMPS.tree)}
-${rampGlsl('waterDot', 'dot(c, vec3(0.2126, 0.7152, 0.0722)) * 255.0', RAMPS.water)}
 
 // Hillshade from the Relieve, lit from the north-west: 1 on the flat, more on slopes facing the
 // light, less on those turned from it.
@@ -268,60 +268,88 @@ float lit(vec2 xz) {
   return clamp(dot(n, SUN) / SUN.y, 0.6, 1.2);
 }
 
-// The Mancha repaints a Brochazo in its species' colour once the brush's sweep has passed it; each
-// Brochazo is reached at its own moment of the sweep.
-bool swept(vec2 id, out vec3 species) {
-  vec4 m = cellOf(uMancha, id);
-  species = vec3(0.0);
-  if (m.g <= 0.0) return false;
-  vec3 kinds = vec3(m.ba, max(1.0 - m.b - m.a, 0.0));
-  species = (uEspecies[0] * kinds.x + uEspecies[1] * kinds.y + uEspecies[2] * kinds.z) / max(kinds.x + kinds.y + kinds.z, 1e-3);
-  float at = hash12(id + 1.9);
-  return at > m.r && at < m.g;
+// How much paint the Bruma lets a Brochazo here have. Towards the Bruma fewer Brochazos are laid,
+// and those thin into the paper. Whatever the Bruma keeps painted, nothing reaches the Mapa's own
+// edge: a ragged margin of paper hides its square.
+float brumaAt(vec2 xz) {
+  float inset = min(min(xz.x - MAP_MIN.x, MAP_MAX.x - xz.x), min(xz.y - MAP_MIN.y, MAP_MAX.y - xz.y));
+  inset += (tnoise(xz * 0.09 + 31.0) * 0.7 + tnoise(xz * 0.31 - 8.0) * 0.3) * ${EDGE_RAG_KM.toFixed(1)};
+  return painted(xz) * smoothstep(${EDGE_BARE_KM.toFixed(1)}, ${(EDGE_BARE_KM + EDGE_FADE_KM).toFixed(1)}, inset);
 }
+
+// A colour as it lies on the Lienzo: lit by the Relieve and thinned into the paper by the Bruma.
+vec3 laid(vec3 paint, vec2 xz, float bruma) {
+  paint = clamp(paint * mix(1.0, lit(xz), RELIEF_DEPTH), 0.0, 1.0);
+  return mix(PAPER, paint, 0.45 + 0.55 * bruma);
+}
+`
+
+/**
+ * Each Brochazo as the design would paint it, worked out once a frame: rgb its colour, lit by the
+ * Relieve, a how wide its paint lies (km).
+ */
+const pintaFragment = /* glsl */ `
+${LUZ_GLSL}
+uniform sampler2D uSuelo;
+uniform sampler2D uVegetacion;
+uniform sampler2D uAgua;
+uniform sampler2D uMancha;
+
+${rampGlsl('groundDot', '(c.r - c.g) * 255.0', RAMPS.ground)}
+${rampGlsl('treeDot', 'dot(c, vec3(0.2126, 0.7152, 0.0722)) * 255.0', RAMPS.tree)}
+${rampGlsl('waterDot', 'dot(c, vec3(0.2126, 0.7152, 0.0722)) * 255.0', RAMPS.water)}
 
 void main() {
   vec2 id = CELLS_MIN + floor(gl_FragCoord.xy);
   vec2 xz = brochazoAt(id);
-  // Towards the Bruma fewer Brochazos are laid, and those thin into the paper. Whatever the Bruma
-  // keeps painted, nothing reaches the Mapa's own edge: a ragged margin of paper hides its square.
-  float inset = min(min(xz.x - MAP_MIN.x, MAP_MAX.x - xz.x), min(xz.y - MAP_MIN.y, MAP_MAX.y - xz.y));
-  inset += (tnoise(xz * 0.09 + 31.0) * 0.7 + tnoise(xz * 0.31 - 8.0) * 0.3) * ${EDGE_RAG_KM.toFixed(1)};
-  float bruma = painted(xz) * smoothstep(${EDGE_BARE_KM.toFixed(1)}, ${(EDGE_BARE_KM + EDGE_FADE_KM).toFixed(1)}, inset);
+  float bruma = brumaAt(xz);
   if (hash12(id + 9.1) >= bruma) {
     gl_FragColor = vec4(0.0);
     return;
   }
   vec4 s = cellOf(uSuelo, id);
   vec4 v = cellOf(uVegetacion, id);
-  vec3 paint;
-  float r;
-  float full;
-  if (s.a > 0.4) {
-    waterDot(s.rgb, paint, r);
-    full = 1.0;
-  } else {
-    vec3 ground;
-    float rg;
-    groundDot(s.rgb, ground, rg);
-    vec3 tree;
-    float rt;
-    treeDot(v.rgb, tree, rt);
-    paint = mix(ground, tree, v.a);
-    r = mix(rg, rt, v.a);
-    full = v.a;
-  }
-  vec3 species;
-  if (swept(id, species)) {
-    paint = species;
-    r = max(r, ${RAMPS.tree[4][2].toFixed(3)});
-    full = 1.0;
-  }
+  vec4 w = cellOf(uAgua, id);
+  vec3 ground;
+  float rg;
+  groundDot(s.rgb, ground, rg);
+  vec3 tree;
+  float rt;
+  treeDot(v.rgb, tree, rt);
+  vec3 water;
+  float rw;
+  waterDot(w.rgb, water, rw);
+  vec3 paint = mix(mix(ground, tree, v.a), water, w.a);
+  float r = mix(mix(rg, rt, v.a), rw, w.a);
+  float full = mix(v.a, 1.0, w.a);
+  // As far as the Mancha's brush has swept along it, the paint lies as thick as a tree's.
+  vec4 m = cellOf(uMancha, id);
+  float taken = clamp(m.g - m.r, 0.0, 1.0);
+  r = mix(r, max(r, ${RAMPS.tree[4][2].toFixed(3)}), taken);
+  full = mix(full, 1.0, taken);
   // Narrower than the design's dots on open ground, wider where the paint must cover it whole.
   r *= mix(0.7, 1.15, full);
-  paint = clamp(paint * mix(1.0, lit(xz), RELIEF_DEPTH), 0.0, 1.0);
-  paint = mix(PAPER, paint, 0.45 + 0.55 * bruma);
-  gl_FragColor = vec4(paint, r);
+  gl_FragColor = vec4(laid(paint, xz, bruma), r);
+}
+`
+
+/** The Mancha's colour on each Brochazo it has, laid as the Brochazo's own paint is. */
+const especieFragment = /* glsl */ `
+${LUZ_GLSL}
+uniform sampler2D uMancha;
+uniform vec3 uEspecies[${ESPECIES.length}];
+
+void main() {
+  vec2 id = CELLS_MIN + floor(gl_FragCoord.xy);
+  vec2 xz = brochazoAt(id);
+  vec4 m = cellOf(uMancha, id);
+  if (m.g <= 0.0) {
+    gl_FragColor = vec4(0.0);
+    return;
+  }
+  vec3 kinds = vec3(m.ba, max(1.0 - m.b - m.a, 0.0));
+  vec3 species = (uEspecies[0] * kinds.x + uEspecies[1] * kinds.y + uEspecies[2] * kinds.z) / max(kinds.x + kinds.y + kinds.z, 1e-3);
+  gl_FragColor = vec4(laid(species, xz, brumaAt(xz)), 1.0);
 }
 `
 
@@ -330,6 +358,8 @@ ${GLSL_COMMON}
 ${BROCHAZO_GLSL}
 ${CELL_GLSL}
 uniform sampler2D uPinta;
+uniform sampler2D uEspecie;
+uniform sampler2D uMancha;
 
 const vec3 PAPER = ${rgb(DESIGN_PAPER)};
 const vec2 MAP_MIN = vec2(${MAP.minX.toFixed(1)}, ${MAP.minZ.toFixed(1)});
@@ -360,7 +390,16 @@ vec4 trazos(vec2 xz, float texel) {
       vec2 d = xz - at;
       vec2 q = vec2(cos(a) * d.x + sin(a) * d.y, cos(a) * d.y - sin(a) * d.x) / vec2(STROKE_KM, p.a);
       float cover = clamp((1.0 - length(q)) * p.a / texel + 0.5, 0.0, 1.0);
-      col = mix(col, p.rgb, cover);
+      // The Mancha's colour runs along the stroke from its start, as far as its brush has swept.
+      vec4 m = cellOf(uMancha, id);
+      vec3 stroke = p.rgb;
+      if (m.g > m.r) {
+        float along = q.x * 0.5 + 0.5;
+        float edge = texel / (2.0 * STROKE_KM);
+        float swept = smoothstep(m.r - edge, m.r + edge, along) * (1.0 - smoothstep(m.g - edge, m.g + edge, along));
+        stroke = mix(stroke, cellOf(uEspecie, id).rgb, swept);
+      }
+      col = mix(col, stroke, cover);
       paint = mix(paint, 1.0, cover);
     }
   }
@@ -412,20 +451,28 @@ export function Brochazos() {
       uCraterLake: { value: new THREE.Vector2(...CRATER_LAKE) },
     })
     const vegetacion = new CellPass(vegetacionFragment, data)
+    const agua = new CellPass(aguaFragment, { ...data, ...riverUniforms })
+    const uShore = { value: brumaTexture() }
     const pinta = new CellPass(pintaFragment, {
       ...shared,
       ...mancha,
-      uShore: { value: brumaTexture() },
+      uShore,
       uSuelo: { value: suelo.texture },
       uVegetacion: { value: vegetacion.texture },
+      uAgua: { value: agua.texture },
+    })
+    const especie = new CellPass(especieFragment, {
+      ...shared,
+      ...mancha,
+      uShore,
       uEspecies: { value: ESPECIES.map((e) => srgb(e.color)) },
     })
-    const raster = new CellPass(lienzoFragment, { ...shared, uPinta: { value: pinta.texture } }, DESIGN_RASTER)
-    return [suelo, vegetacion, pinta, raster]
+    const raster = new CellPass(lienzoFragment, { ...shared, ...mancha, uPinta: { value: pinta.texture }, uEspecie: { value: especie.texture } }, DESIGN_RASTER)
+    return [suelo, vegetacion, agua, pinta, especie, raster]
   }, [hf])
   useEffect(() => () => passes.forEach((p) => p.dispose()), [passes])
 
   useFrame(({ gl }) => passes.forEach((p) => p.draw(gl)))
 
-  return <Lienzo raster={passes[3].texture} />
+  return <Lienzo raster={passes[passes.length - 1].texture} />
 }
