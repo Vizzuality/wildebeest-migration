@@ -130,3 +130,9 @@ _Avoid_: cola, atasco, espera
 El cruce en tropel que pone fin a un Agolpamiento: la Manada atraviesa el Cruce de golpe, más deprisa que su paso normal.
 _Avoid_: estampida, cruce masivo
 
+
+### Relato
+
+**Capítulo**:
+Uno de los cinco tramos en que se cuenta el año, cada uno anclado a un lugar del Recorrido y a una fecha, con su título y su texto (por ejemplo, "The crossing": el Mara, 1 de agosto). Va desde su fecha hasta la del siguiente.
+_Avoid_: escena, sección, paso, chapter
