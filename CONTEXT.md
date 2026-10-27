@@ -1,6 +1,6 @@
 # Serengeti Migration
 
-Visualización 3D del ciclo anual de la migración de ñus en el ecosistema Serengeti–Mara, sobre un relieve basado en elevación real.
+Visualización 2D del ciclo anual de la migración de ñus en el ecosistema Serengeti–Mara, pintada como un cuadro impresionista visto desde arriba.
 
 ## Language
 
@@ -10,9 +10,9 @@ Visualización 3D del ciclo anual de la migración de ñus en el ecosistema Sere
 El rectángulo geográfico que se representa, de lon 33,27 a 35,98 y de lat −0,67 a −3,67, con margen para que ningún lugar de la historia quede en la Bruma, medido en kilómetros desde el origen (34,85, −2,3).
 _Avoid_: mundo, escena, bbox
 
-**Corte**:
-El trozo del Mapa que se ve, recortado como una isla y levantado como una maqueta de museo: una costa con bahías, cabos e islotes, nunca el rectángulo, que deja dentro cada lugar con nombre y atraviesa el agua del Lago Victoria y del Eyasi. Sus paredes muestran los estratos bajo el Relieve y el agua de los Lagos que cortan, y descansa sobre una mesa de arena que se pierde en el horizonte.
-_Avoid_: borde, recorte, bbox
+**Brochazo**:
+Un toque corto de pintura, puntillista e irregular, con su sitio fijo en el Mapa. Todo el Mapa está pintado con ellos: primero el suelo y, encima, la vegetación. Su color lo da lo que hay en ese punto en cada mes; nunca se mueve ni cambia de forma.
+_Avoid_: punto, pincelada, stroke, dab, partícula
 
 **DEM**:
 Modelo digital de elevación real (metros sobre el nivel del mar) del que se obtiene el relieve del Mapa.
@@ -29,10 +29,6 @@ _Avoid_: nivel del mar, sea level
 **Lago**:
 Agua quieta dentro del Mapa: la orilla oriental del Lago Victoria, partes de los lagos Eyasi, Manyara y Natron, y los lagos Ndutu y Masek, pequeños y salobres, en las llanuras del sur. Es la superficie plana que el DEM da a cada lago (en el caso del Victoria, la Cota base).
 _Avoid_: agua, water mask, costa
-
-**Exageración vertical**:
-El factor fijo por el que se multiplica el desnivel real para que el Relieve sea legible a escala de 200 km.
-_Avoid_: escala Y, multiplier
 
 ### Agua
 
@@ -82,15 +78,11 @@ _Avoid_: fuego, burn, incendio
 La franja de árboles densos que bordea los ríos. Es la Cobertura la que la define, no la distancia al cauce.
 _Avoid_: riparian, ribera
 
-**Bosquete**:
-Un grupo de árboles o matas que se dibuja con volumen sobre la Cobertura. Hay tres tipos: acacia paraguas, copa redonda y matorral bajo.
-_Avoid_: árbol, tree, instancia
-
 ### Atmósfera
 
 **Bruma**:
-Masa de calima cálida y volumétrica que envuelve el Mapa en un óvalo irregular, con lenguas que entran desde el borde. Solo existe hacia los bordes: el terreno del interior se ve limpio, sin velo. Se encharca en lo bajo, se retira en las tierras altas (el Relieve la recorta) y deja siempre despejado cada lugar con nombre.
-_Avoid_: niebla de guerra, fog, fog of war, fade del borde
+El borde sin terminar del cuadro: hacia los bordes los Brochazos se espacian y se aclaran hasta dejar el papel desnudo, en un óvalo irregular con lenguas que entran desde el borde. El interior está pintado entero. Deja siempre pintado cada lugar con nombre.
+_Avoid_: niebla de guerra, fog, fog of war, fade del borde, Corte, recorte
 
 **Meteoro**:
 Lo que el que mira vive del momento del año sin que cambie el Mapa: lluvia, sombras de nubes, polvo, humo y Reverbero. Cubre toda la imagen por igual, como si estuviera entre el ojo y el Mapa, y su fuerza la marca el tiempo que hace allí donde está la Manada. Acompaña, nunca tapa: la Mancha y las etiquetas se leen siempre. El humo solo sale cuando arde una Quema cerca de la Manada. No es la Bruma, que es del Mapa.
@@ -127,12 +119,8 @@ Cuánto se extiende la Manada en cada mes y en qué dirección se alarga, deriva
 _Avoid_: densidad, heatmap, extensión
 
 **Mancha**:
-La forma en que se ve cada especie de la Manada a escala de Mapa: un único cuerpo espeso, como barro, siempre de una pieza, que fluye por el Recorrido. Al trasladarse se estira en una corriente: la cabeza tira y la cola va detrás. En cada parada se encharca. Nunca salta ni se rompe. Las Manchas de distintas especies se funden en un solo cuerpo donde coinciden y se separan donde sus Recorridos se apartan. Se dibuja como una malla de puntos fija al Relieve: cada punto es de una especie, no se mueve, y aparece y se apaga al paso de la Manada. Fuera de la Mancha no hay malla. Solo se extiende por el suelo que pisan los collares: nunca sobre un Lago ni encima de un escarpe al que no suben, salvo justo alrededor del Recorrido, para no romperse. El Mara la corta: solo pasa a la otra orilla por donde la cruza.
-_Avoid_: blob, metaball, líquido, gotas, punteado
-
-**Apiñamiento**:
-Lo apretada que va la Manada en cada punto de la Mancha. Es lo único de los eventos que se ve en la propia Mancha: donde más se apiña, más oscuros y más grandes son los puntos de su malla.
-_Avoid_: densidad, superposición, Presencia
+La forma en que se ve cada especie de la Manada a escala de Mapa: un único cuerpo espeso, como barro, siempre de una pieza, que fluye por el Recorrido. Al trasladarse se estira en una corriente: la cabeza tira y la cola va detrás. En cada parada se encharca. Nunca salta ni se rompe. Las Manchas de distintas especies se funden en un solo cuerpo donde coinciden y se separan donde sus Recorridos se apartan. No tiene trazo propio: repinta del color de su especie los Brochazos que ya hay donde pasa la Manada, sin moverlos ni cambiarles la forma, y al irse la Manada vuelven a su color. Repinta tanto los del suelo como los de la vegetación. Cada Brochazo entra en la Mancha en su propio momento, así que su borde es granulado. El color no cambia de golpe: se pinta, con un barrido de pincel a lo largo del Brochazo, y al irse la Manada el color del suelo vuelve a pasar por encima de la misma manera. Solo se extiende por el suelo que pisan los collares: nunca sobre un Lago ni encima de un escarpe al que no suben, salvo justo alrededor del Recorrido, para no romperse. El Mara la corta: solo pasa a la otra orilla por donde la cruza.
+_Avoid_: blob, metaball, líquido, gotas, punteado, malla de puntos
 
 **Agolpamiento**:
 La espera de la Manada en la orilla de un Cruce: la cabeza se para, la cola sigue llegando y la Mancha se encharca contra el río. Dura más cuanto más Caudal lleva el río y es sobre todo cosa del Mara, que se pasa en Kogatende a la ida y a la vuelta; en el Grumeti y el Mbalageti apenas hay espera. Las cebras, que van en la cabeza, llegan algo antes y cruzan primero.
@@ -142,3 +130,9 @@ _Avoid_: cola, atasco, espera
 El cruce en tropel que pone fin a un Agolpamiento: la Manada atraviesa el Cruce de golpe, más deprisa que su paso normal.
 _Avoid_: estampida, cruce masivo
 
+
+### Relato
+
+**Capítulo**:
+Uno de los cinco tramos en que se cuenta el año, cada uno anclado a un lugar del Recorrido y a una fecha, con su título y su texto (por ejemplo, "The crossing": el Mara, 1 de agosto). Va desde su fecha hasta la del siguiente.
+_Avoid_: escena, sección, paso, chapter

@@ -6,7 +6,8 @@ import { useFauna, type FaunaBake } from '../fauna'
 import { CAUDAL, MAP } from '../geo'
 import { stageAt } from '../shaders/rivers'
 import { GLSL_COMMON, shared } from '../shaders/common'
-import { mulberry32, useHeightfield, type Heightfield, type RiverLine } from '../terrain'
+import { BROCHAZO_GLSL, CellPass } from '../shaders/brochazos'
+import { mulberry32, useHeightfield, type RiverLine } from '../terrain'
 import { useStore } from '../store'
 
 // The Manada as a liquid poured along the Recorrido. It is a chain of drops, each running a
@@ -34,77 +35,12 @@ const SIZE_POWER = 0.3
 /** The field at the body's edge. */
 const EDGE = 0.9
 /**
- * Each dot turns on at its own field, up to STAGGER either side of EDGE, so the edge sweeping
- * across the mesh lights the dots one by one instead of a whole row at once.
+ * Each Brochazo joins the Mancha at its own field, up to STAGGER either side of EDGE, all at once,
+ * so the edge sweeping across the Mapa takes the Brochazos one by one and stays grainy.
  */
 const STAGGER = 0.35
-/**
- * How far into the body a dot is all the way in: it grows from nothing, overshoots a little and
- * settles, fading in as it grows, so it swells up rather than switching on.
- */
-const DOT_GROW = 0.5
-/**
- * How far in each dot is, and its species, are worked out afresh every frame from the moment of
- * the year alone, so scrubbing the Timeline lands on the same dots as playing up to it. They are
- * kept in a texel of a GLOW_CELLS-wide map that wraps round the mesh, wider than any Mancha.
- */
-const GLOW_CELLS = 512
 /** The Mancha's wobble and lobes come round this many times a year, so they close the year too. */
 const WOBBLES_PER_YEAR = 2
-/**
- * The mesh breathes as the Manada moves: along a stream the dots are smallest at its head and its
- * tail, BREATH_LOW of their size, and swell towards its middle, so each patch of ground swells as
- * the middle of the stream goes over and sinks again as the tail does. Pooled, it doesn't.
- */
-const BREATH_LOW = 0.45
-/**
- * Each dot glows: towards its middle its colour climbs to SHINE in brightness, over the Bloom's
- * threshold, whichever species it is. Along a stream it burns SHINE_BREATH less at the head and the
- * tail.
- */
-const SHINE = 3
-const SHINE_BREATH = 0.5
-/** The most a dot's middle burns over its own colour. */
-const GLARE_MAX = 2.6
-/** The field over which the Apiñamiento goes from none to full. */
-const CROWD_FROM = 2
-const CROWD_FULL = 9
-/**
- * The Mancha is drawn as a mesh of dots pinned to the Relieve: the dots never move, the Manada
- * shows them as it passes. MESH_KM apart along the map's axes, DOT_KM across where the Manada is
- * loosest and DOT_CROWDED_KM where it packs tightest, each in its species' colour, darkening as
- * it packs. Once the dots are closer than about a pixel they blur into their mean, so far off
- * the mesh reads as an even tint instead of shimmering.
- */
-const MESH_KM = 0.7
-const DOT_KM = 0.21
-const DOT_CROWDED_KM = 0.28
-/**
- * Each dot is a bulb: the glass in its species' colour, burning brighter towards its middle, and
- * a halo of that colour spilling HALO times as far onto the ground, HALO_ALPHA strong at the glass.
- */
-/** How far a dot's colour pales towards white: its glass, and where it burns over the Bloom. */
-const WARM = 0.03
-const HOT = 0.08
-const HALO = 1.8
-const HALO_ALPHA = 0.35
-/**
- * Blurred into their mean far off, the dots cover too little of the ground to read at map scale,
- * so the mean is drawn FAR_BOOST times as thick.
- */
-const FAR_BOOST = 2
-/**
- * The Manada gives off light of its own: an aura in its species' colours over the whole body,
- * AURA strong where it is thickest, added to the ground under it rather than laid over it.
- */
-const AURA = 1.6
-/**
- * A perfectly regular mesh in motion makes waves the eye invents, and moiré against the pixels.
- * Each dot is nudged off its place by up to JITTER of the spacing and drawn up to SIZE_SPREAD
- * bigger or smaller, the same for every frame, so the rows still read but nothing repeats.
- */
-const JITTER = 0.25
-const SIZE_SPREAD = 0.25
 /**
  * The liquid runs out over green, level grass and draws back off slopes and bare ground, so its
  * edge follows the land it crosses: the field is raised to 1 / land, land running from LAND_POOR
@@ -220,16 +156,6 @@ const STAY_SEARCH = [0.2, 0.6]
 const CLOCK_FROM = 3
 /** Crossings of the same river closer than this along the way (months) are one Cruce. */
 const SAME_CRUCE = 0.3
-/** Draped grid resolution, and the lift that keeps it off the ground (km). */
-const GRID = 320
-const LIFT = 0.03
-/**
- * The grid is coarser than the ground and its Bosquetes, so between its vertices a ridge or a
- * crown can rise above it. Each vertex is drawn this much nearer the camera along its own line of
- * sight (km): it stays put on screen but wins over anything that close behind it.
- */
-const PULL = 0.6
-
 interface Wave {
   size: number
   phase: number
@@ -295,21 +221,21 @@ function drops(): Drop[] {
  * One Mancha per species, all in one field, so they run together where they meet and part where
  * their ways do. The zebras keep the wildebeest's way mixed into its head, about a day (`ahead`,
  * months) in front, cropping the long grass first; the gazelles keep a shorter way of their own.
- * Each is drawn to its share of the head count (millions; area goes with numbers, so size with the square root). Each dot of the
- * mesh is one species, picked by the species' share of the animals there, and as big as that
- * species' animals are long next to a wildebeest (`size`).
+ * Each is drawn to its share of the head count (millions; area goes with numbers, so size with the
+ * square root). Each Brochazo the Mancha takes goes to one species, picked by the species' share of
+ * the animals there, and is repainted in its colour.
  */
-const ESPECIES = [
-  { name: 'ñu', count: 1.3, ahead: 0, size: 1, color: [0.36, 0.44, 0.62] },
-  { name: 'cebra', count: 0.2, ahead: 0.025, size: 1.1, color: [0.86, 0.84, 0.78] },
-  { name: 'gacela', count: 0.35, ahead: 0, size: 0.45, color: [1.0, 0.8, 0.52] },
+export const ESPECIES = [
+  { name: 'ñu', count: 1.3, ahead: 0 },
+  { name: 'cebra', count: 0.2, ahead: 0.025 },
+  { name: 'gacela', count: 0.35, ahead: 0 },
 ] as const
 const HEAD_COUNT = ESPECIES.reduce((sum, e) => sum + e.count, 0)
 const SLOTS = DROPS * ESPECIES.length
 
 const uniforms = {
-  /** Each drop of every species: x, z, radius (km) and the ground height under it. */
-  uDrops: { value: Array.from({ length: SLOTS }, () => new THREE.Vector4()) },
+  /** Each drop of every species: x, z and radius (km). */
+  uDrops: { value: Array.from({ length: SLOTS }, () => new THREE.Vector3()) },
   /** Each drop's heading and its radius along it: on the move drops stretch into a stream. */
   uAxes: { value: Array.from({ length: SLOTS }, () => new THREE.Vector3(1, 0, 1)) },
   /** Each drop's point on the Recorrido itself (x, z) and radius, in order along the stream. */
@@ -320,12 +246,8 @@ const uniforms = {
   uSize: { value: 1 },
   /** How much each drop is on the move (0 pooled, 1 streaming). */
   uMotion: { value: Array.from({ length: SLOTS }, () => 0) },
-  uColors: { value: ESPECIES.map((e) => new THREE.Vector3(...e.color)) },
   /** Each species' head count (millions). */
   uHeads: { value: ESPECIES.map((e) => e.count) },
-  uDotSizes: { value: new THREE.Vector3(...ESPECIES.map((e) => e.size)) },
-  /** How far in each dot of the mesh is, 0 to 1. */
-  uGlow: { value: null as THREE.Texture | null },
   /** Where the Manada can be at all (r: the ground the collars reach, off the Lagos) and which bank of the Mara it is (g). */
   uGround: { value: null as THREE.Texture | null },
   uGroundSize: { value: new THREE.Vector3() },
@@ -334,32 +256,23 @@ const uniforms = {
   uChainBank: { value: Array.from({ length: SLOTS * CHAIN_POINTS }, () => 0) },
 }
 
-const vertex = /* glsl */ `
-${GLSL_COMMON}
-uniform vec2 uOrigin;
-uniform float uSize;
-varying vec2 vWorld;
-varying float vHeight;
-void main() {
-  vec2 xz = uOrigin + uv * uSize;
-  vWorld = xz;
-  vHeight = heightAt(xz) + ${LIFT.toFixed(3)};
-  vec3 world = vec3(xz.x, vHeight, xz.y);
-  world += normalize(cameraPosition - world) * ${PULL.toFixed(2)};
-  gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
-}
-`
+/**
+ * Per Brochazo cell of the Mapa, how much of it the Mancha has painted: its colour runs along the
+ * Brochazo from r to g (0 its start, 1 its end), and it goes to the species b, a and what is left.
+ */
+export const mancha = { uMancha: { value: null as THREE.Texture | null } }
+
+/** How long (s) the brush takes to sweep the Mancha's colour along a Brochazo, or the ground's back over it. */
+const PAINT_SECONDS = 0.6
 
 const FIELD = /* glsl */ `
 ${GLSL_COMMON}
-uniform vec4 uDrops[${SLOTS}];
+uniform vec3 uDrops[${SLOTS}];
 uniform vec3 uAxes[${SLOTS}];
 uniform vec3 uSpine[${SLOTS}];
 uniform vec3 uChain[${SLOTS * CHAIN_POINTS}];
 uniform float uMotion[${SLOTS}];
-uniform vec3 uColors[${ESPECIES.length}];
 uniform float uHeads[${ESPECIES.length}];
-uniform vec3 uDotSizes;
 uniform sampler2D uGround;
 uniform vec3 uGroundSize;
 uniform float uDropBank[${SLOTS}];
@@ -388,9 +301,7 @@ float tube(vec2 p, vec2 a, vec2 b, float ra, float rb) {
 }
 
 // How much of the Manada there is at world, and how much of it each species brings.
-// lungs gathers how full each species' body there is, weighted: pooled it is full, along a stream
-// it runs from 0 at either end to 1 in the middle. x is the weighted fullness, y the weight.
-float fieldAt(vec2 world, inout float own[${ESPECIES.length}], inout vec2 lungs[${ESPECIES.length}]) {
+float fieldAt(vec2 world, inout float own[${ESPECIES.length}]) {
   // How much the liquid here is on the move, from the drops nearby.
   float moving = 0.0;
   float nearby = 1e-6;
@@ -412,7 +323,7 @@ float fieldAt(vec2 world, inout float own[${ESPECIES.length}], inout vec2 lungs[
     tnoise(lobes + vec2(slow.x, 3.1 + slow.y)) * 0.7 + tnoise(lobes * 2.3 - vec2(5.7 + fast.y, fast.x)) * 0.3,
     tnoise(lobes + vec2(11.3 + slow.y, -slow.x)) * 0.7 + tnoise(lobes * 2.3 + vec2(fast.x, 8.9 + fast.y)) * 0.3
   );
-  // The Mara cuts the Manada: a drop lights only its own bank of it, and a stretch of the way only
+  // The Mara cuts the Manada: a drop takes only its own bank of it, and a stretch of the way only
   // the banks its ends are on, so it spills across only where it crosses. Taken on the ground, not
   // the warped body, so the cut runs along the river itself.
   vec2 ground = groundAt(world);
@@ -432,29 +343,19 @@ float fieldAt(vec2 world, inout float own[${ESPECIES.length}], inout vec2 lungs[
     float w = exp(-spread) * (1.0 - uMotion[i]);
     field += w;
     own[i / ${DROPS}] += w;
-    lungs[i / ${DROPS}] += vec2(w);
   }
   // Spine along the Recorrido, and each drop's stretch of the way as one tube round the nearest
   // of its points, so it bends smoothly with the way instead of beading where the points meet.
   for (int i = 0; i < ${SLOTS}; i++) {
     float best = 1e9;
-    float along = 0.0;
     for (int k = 0; k + 1 < ${CHAIN_POINTS}; k++) {
       if (min(abs(ground.g - uChainBank[i * ${CHAIN_POINTS} + k]), abs(ground.g - uChainBank[i * ${CHAIN_POINTS} + k + 1])) > 0.5) continue;
       vec3 a = uChain[i * ${CHAIN_POINTS} + k];
       vec3 b = uChain[i * ${CHAIN_POINTS} + k + 1];
-      float d = tube(p, a.xy, b.xy, a.z, b.z);
-      if (d < best) {
-        best = d;
-        vec2 ab = b.xy - a.xy;
-        along = (float(k) + clamp(dot(p - a.xy, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0)) / ${(CHAIN_POINTS - 1).toFixed(1)};
-      }
+      best = min(best, tube(p, a.xy, b.xy, a.z, b.z));
     }
     float w = 0.0;
-    if (best < 6.0) {
-      w += exp(-best) * mix(1.0, ${STREAM_DEPTH.toFixed(2)}, uMotion[i]);
-      lungs[i / ${DROPS}] += vec2(w * mix(1.0, sin(3.14159 * along), uMotion[i]), w);
-    }
+    if (best < 6.0) w += exp(-best) * mix(1.0, ${STREAM_DEPTH.toFixed(2)}, uMotion[i]);
     // Threaded only within a species: two Manchas join where they touch, not along a spine.
     if ((i + 1) % ${DROPS} != 0) {
       w += thread(p, uSpine[i], uSpine[i + 1], min(uSpine[i].z, uSpine[i + 1].z) * 0.55);
@@ -467,143 +368,25 @@ float fieldAt(vec2 world, inout float own[${ESPECIES.length}], inout vec2 lungs[
   float steep = smoothstep(0.04, 0.2, length(slope));
   float land = mix(${LAND_POOR.toFixed(2)}, ${LAND_RICH.toFixed(2)}, lush * (1.0 - steep));
   field = pow(max(field, 1e-6), 1.0 / land);
-  // Pinned to the ground rather than the warped body: where the collars never go, no dot lights.
+  // Pinned to the ground rather than the warped body: where the collars never go, the Mancha doesn't.
   field *= ground.r;
   return field;
 }
 `
 
-const fragment = /* glsl */ `
-${FIELD}
-uniform sampler2D uGlow;
-varying vec2 vWorld;
-varying float vHeight;
-
-void main() {
-  // Most of the quad has no dot in; skip the field there.
-  vec2 cell = vWorld / ${MESH_KM.toFixed(2)};
-  float alive = 0.0;
-  for (int j = -1; j <= 1; j++) {
-    for (int i = -1; i <= 1; i++) {
-      alive = max(alive, texture2D(uGlow, (mod(floor(cell) + vec2(float(i), float(j)), ${GLOW_CELLS}.0) + 0.5) / ${GLOW_CELLS}.0).r);
-    }
-  }
-  if (alive <= 0.0) discard;
-  float own[${ESPECIES.length}];
-  for (int s = 0; s < ${ESPECIES.length}; s++) own[s] = 0.0;
-  vec2 lungs[${ESPECIES.length}];
-  for (int s = 0; s < ${ESPECIES.length}; s++) lungs[s] = vec2(0.0);
-  float field = fieldAt(vWorld, own, lungs);
-  // Each species breathes on its own, so a stream running over another species' pool leaves its
-  // dots be: 1 where it is pooled or mid-stream, BREATH_LOW at a stream's ends.
-  vec3 breaths;
-  for (int s = 0; s < ${ESPECIES.length}; s++) breaths[s] = mix(${BREATH_LOW.toFixed(2)}, 1.0, lungs[s].x / max(lungs[s].y, 1e-3));
-
-  // Apiñamiento: the more drops pile up on a point, the more packed the Manada is there.
-  float crowd = smoothstep(${CROWD_FROM.toFixed(1)}, ${CROWD_FULL.toFixed(1)}, field);
-  // It packs round its middle, pooled or on the move.
-  crowd = max(crowd, smoothstep(0.6, 2.6, field));
-
-  // The nearest dot of the mesh, on the ground itself rather than the warped body. A nudged dot
-  // can reach into the next cell, so the cells around are looked at too.
-  float base = mix(${DOT_KM.toFixed(2)}, ${DOT_CROWDED_KM.toFixed(2)}, crowd);
-  float dist = 1e9;
-  float radius = 0.0;
-  float glowing = 0.0;
-  vec3 kind = vec3(1.0, 0.0, 0.0);
-  float breath = 1.0;
-  for (int j = -1; j <= 1; j++) {
-    for (int i = -1; i <= 1; i++) {
-      vec2 id = floor(cell) + vec2(float(i), float(j));
-      vec2 nudge = (vec2(hash12(id), hash12(id + 71.3)) - 0.5) * ${(2 * JITTER).toFixed(2)};
-      float d = length(cell - id - 0.5 - nudge) * ${MESH_KM.toFixed(2)};
-      vec4 held = texture2D(uGlow, (mod(id, ${GLOW_CELLS}.0) + 0.5) / ${GLOW_CELLS}.0);
-      float glow = held.r;
-      float back = glow - 1.0;
-      float grow = 1.0 + 2.7 * back * back * back + 1.7 * back * back;
-      float kinds = max(held.g + held.b + held.a, 1e-3);
-      float lung = dot(held.gba, breaths) / kinds;
-      grow *= lung * dot(held.gba, uDotSizes) / kinds;
-      float r = base * grow * (1.0 + (hash12(id + 19.7) - 0.5) * ${(2 * SIZE_SPREAD).toFixed(2)});
-      // The bulb that lights this point most: the one whose glass is nearest, in its own radii.
-      if (glow > 0.0 && d / max(r, 1e-4) < dist / max(radius, 1e-4)) {
-        dist = d;
-        radius = r;
-        glowing = smoothstep(0.0, 1.0, glow);
-        kind = held.gba;
-        breath = lung;
-      }
-    }
-  }
-  float aa = length(fwidth(vWorld)) * 0.7;
-  float glass = 1.0 - smoothstep(radius - aa, radius + aa, dist);
-  float spill = dist / max(radius * ${HALO.toFixed(1)}, 1e-4);
-  float halo = ${HALO_ALPHA.toFixed(2)} * exp(-4.0 * spill * spill);
-  // How much of a cell the bulb lights, for where the cells are too small to tell apart.
-  float mean = 3.14159 * radius * radius * (1.0 + ${(HALO_ALPHA * HALO * HALO * 0.25).toFixed(3)}) * ${FAR_BOOST.toFixed(1)} / ${(MESH_KM * MESH_KM).toFixed(4)};
-  float blur = smoothstep(0.5, 0.9, length(fwidth(cell)));
-  float alpha = min(mix(max(glass, halo), mean, blur), 1.0) * glowing;
-  // No bulb lights a rock face: a dot's edge or halo over the dark shadow under a cliff reads as a
-  // red streak.
-  vec2 slope = vec2(heightAt(vWorld + vec2(0.3, 0.0)) - heightAt(vWorld - vec2(0.3, 0.0)), heightAt(vWorld + vec2(0.0, 0.3)) - heightAt(vWorld - vec2(0.0, 0.3))) / 0.6;
-  float rock = 1.0 - smoothstep(0.15, 0.35, length(slope));
-  alpha *= rock;
-  float body = ${AURA.toFixed(2)} * smoothstep(${(EDGE - DOT_GROW - 0.3).toFixed(2)}, ${(EDGE + 2).toFixed(2)}, field) * rock;
-  if (alpha < 0.005 && body < 0.005) discard;
-  vec3 colour = (uColors[0] * kind.x + uColors[1] * kind.y + uColors[2] * kind.z) / max(kind.x + kind.y + kind.z, 1e-3);
-  vec3 tint = srgb(colour * mix(1.0, 0.75, crowd));
-  // Towards the middle the glass burns up to SHINE.
-  float middle = 1.0 - smoothstep(0.0, radius, dist);
-  float burn = ${SHINE.toFixed(2)} * (1.0 - ${SHINE_BREATH.toFixed(2)} * (1.0 - breath) / ${(1 - BREATH_LOW).toFixed(2)});
-  float bright = max(dot(tint, vec3(0.2126, 0.7152, 0.0722)), 0.02);
-  // Capped, so a dark colour like the ñu's violet doesn't burn out to white at its middle.
-  float glare = clamp(burn / bright, 1.0, ${GLARE_MAX.toFixed(1)});
-  // Lit up, a colour pales towards white, as bright, and the more the hotter it burns.
-  vec3 pale = vec3(bright);
-  vec3 flame = mix(tint, pale, ${WARM.toFixed(2)});
-  // The halo is the bulb's light on the ground, as bright as the glass's edge, so the glass has no
-  // rim: it only burns brighter from there towards its middle.
-  vec3 glow = flame * clamp(burn * 0.5 / bright, 1.0, glare);
-  vec3 lit = mix(glow, mix(tint, pale, ${HOT.toFixed(2)}) * glare, middle * middle);
-  lit = mix(lit, glow, 1.0 - glass);
-  // Blurred, the bulb's light averaged over it: on the whole the glass burns a sixth of the way to
-  // its glare.
-  vec3 average = mix(glow, mix(tint, pale, ${HOT.toFixed(2)}) * glare, 1.0 / 6.0);
-  lit = mix(lit, average, blur);
-  float heads = 1e-6;
-  vec3 aura = vec3(0.0);
-  for (int s = 0; s < ${ESPECIES.length}; s++) {
-    aura += uColors[s] * own[s] * uHeads[s];
-    heads += own[s] * uHeads[s];
-  }
-  // Premultiplied, so the aura adds light where the dots leave the ground showing.
-  gl_FragColor = vec4(lit * alpha + srgb(aura / heads) * body, alpha);
-  #include <tonemapping_fragment>
-  #include <colorspace_fragment>
-}
-`
-
 /**
- * How far in each dot is, from its field now. Each dot comes in at its own field, up to STAGGER
- * either side of the edge, so the edge lights the dots one by one rather than a row at once.
+ * Whether the Mancha has each Brochazo, from its field now, and which species takes it. Worked out
+ * afresh every frame from the moment of the year alone, so scrubbing the Timeline lands on the same
+ * Brochazos as playing up to it.
  */
-const stepVertex = /* glsl */ `
-void main() {
-  gl_Position = vec4(position.xy, 0.0, 1.0);
-}
-`
-
 const stepFragment = /* glsl */ `
 ${FIELD}
-uniform vec2 uCentre;
+${BROCHAZO_GLSL}
 uniform vec2 uOrigin;
 uniform float uSize;
 void main() {
-  vec2 texel = floor(gl_FragCoord.xy);
-  // The dot this texel holds is the one nearest the Manchas' middle.
-  vec2 id = texel + ${GLOW_CELLS}.0 * floor((uCentre - texel) / ${GLOW_CELLS}.0 + 0.5);
-  vec2 nudge = (vec2(hash12(id), hash12(id + 71.3)) - 0.5) * ${(2 * JITTER).toFixed(2)};
-  vec2 at = (id + 0.5 + nudge) * ${MESH_KM.toFixed(2)};
+  vec2 id = CELLS_MIN + floor(gl_FragCoord.xy);
+  vec2 at = brochazoAt(id);
   // Off the quad there is no Manada.
   vec2 inside = (at - uOrigin) / uSize;
   if (min(inside.x, inside.y) < 0.0 || max(inside.x, inside.y) > 1.0) {
@@ -612,11 +395,12 @@ void main() {
   }
   float own[${ESPECIES.length}];
   for (int s = 0; s < ${ESPECIES.length}; s++) own[s] = 0.0;
-  vec2 lungs[${ESPECIES.length}];
-  for (int s = 0; s < ${ESPECIES.length}; s++) lungs[s] = vec2(0.0);
-  float field = fieldAt(at, own, lungs);
+  float field = fieldAt(at, own);
   float on = (hash12(id + 5.3) - 0.5) * ${(2 * STAGGER).toFixed(2)};
-  float due = clamp((field - ${(EDGE - DOT_GROW).toFixed(2)} - on) / ${(2 * DOT_GROW).toFixed(2)}, 0.0, 1.0);
+  if (field < ${EDGE.toFixed(2)} + on) {
+    gl_FragColor = vec4(0.0);
+    return;
+  }
   // Its species, drawn by each one's share of the animals there; blended across a short band of
   // shares so it doesn't flicker between two where they're even. Every Mancha is as thick at its
   // middle whatever its numbers (it is their area that goes with them), so where they overlap
@@ -634,49 +418,33 @@ void main() {
     kind[s] = smoothstep(lo - 0.08, lo + 0.08, pick) - smoothstep(hi - 0.08, hi + 0.08, pick);
     from = to;
   }
-  // The texel has room for three species, after how far in the dot is.
-  gl_FragColor = vec4(due, kind[0], kind[1], kind[2]);
+  gl_FragColor = vec4(1.0, kind[0], kind[1], kind[2]);
 }
 `
 
-/** The map of how far in each dot is, redrawn once a frame. */
-class Glow {
-  private readonly target = new THREE.WebGLRenderTarget(GLOW_CELLS, GLOW_CELLS, {
-    type: THREE.HalfFloatType,
-    minFilter: THREE.NearestFilter,
-    magFilter: THREE.NearestFilter,
-    depthBuffer: false,
-  })
-  private readonly material = new THREE.ShaderMaterial({
-    vertexShader: stepVertex,
-    fragmentShader: stepFragment,
-    uniforms: {
-      ...shared,
-      ...uniforms,
-      uCentre: { value: new THREE.Vector2() },
-    },
-  })
-  private readonly quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.material)
-  private readonly camera = new THREE.OrthographicCamera()
-
-  get texture() {
-    return this.target.texture
+/**
+ * The Mancha's colour is not swapped in, it is painted: on a Brochazo the Mancha takes, the brush
+ * sweeps it along from start to end; on one it leaves, the ground is swept back over it the same
+ * way. It keeps the species it was painted in until the ground has covered it.
+ */
+const paintFragment = /* glsl */ `
+${GLSL_COMMON}
+uniform sampler2D uTaken;
+uniform sampler2D uPainted;
+uniform float uStroke;
+void main() {
+  ivec2 texel = ivec2(gl_FragCoord.xy);
+  vec4 taken = texelFetch(uTaken, texel, 0);
+  vec4 was = texelFetch(uPainted, texel, 0);
+  float stroke = uStroke * mix(0.7, 1.3, hash12(gl_FragCoord.xy + 17.9));
+  if (taken.r > 0.5) {
+    gl_FragColor = vec4(max(was.r - stroke, 0.0), min(was.g + stroke, 1.0), taken.g, taken.b);
+    return;
   }
-
-  draw(gl: THREE.WebGLRenderer) {
-    this.material.uniforms.uCentre.value.copy(uniforms.uOrigin.value).addScalar(uniforms.uSize.value / 2).divideScalar(MESH_KM)
-    const previous = gl.getRenderTarget()
-    gl.setRenderTarget(this.target)
-    gl.render(this.quad, this.camera)
-    gl.setRenderTarget(previous)
-  }
-
-  dispose() {
-    this.target.dispose()
-    this.material.dispose()
-    this.quad.geometry.dispose()
-  }
+  float from = was.r + stroke;
+  gl_FragColor = from >= was.g ? vec4(0.0) : vec4(from, was.g, was.ba);
 }
+`
 
 /**
  * The Recorrido as the Manada follows it and, at each sample, how open it is (1 away from the
@@ -1024,7 +792,7 @@ function bankAt(ground: FaunaBake['ground'], x: number, z: number) {
   return ground.data[(iz * ground.nx + ix) * 2 + 1] / 255
 }
 
-function place(bake: Way, hf: Heightfield, ground: FaunaBake['ground'], all: Drop[], month: number, calendar: number, especie: number) {
+function place(bake: Way, ground: FaunaBake['ground'], all: Drop[], month: number, calendar: number, especie: number) {
   const scale = Math.sqrt(ESPECIES[especie].count / HEAD_COUNT)
   const slot = especie * DROPS
   let minX = Infinity
@@ -1085,7 +853,7 @@ function place(bake: Way, hf: Heightfield, ground: FaunaBake['ground'], all: Dro
     if (px * tx + pz * tz < 0) [px, pz] = [-px, -pz]
     const lane = THREE.MathUtils.smoothstep(pace, LANE_FROM, LANE_FULL)
     const along = r * long
-    uniforms.uDrops.value[slot + i].set(x, z, r / long, hf.heightAt(x, z))
+    uniforms.uDrops.value[slot + i].set(x, z, r / long)
     uniforms.uDropBank.value[slot + i] = bankAt(ground, x, z)
     uniforms.uAxes.value[slot + i].set(px, pz, along)
     uniforms.uMotion.value[slot + i] = lane
@@ -1107,8 +875,8 @@ function place(bake: Way, hf: Heightfield, ground: FaunaBake['ground'], all: Dro
   return { minX, minZ, maxX, maxZ, biggest }
 }
 
-/** One quad under every Mancha. Past ~2.5 radii a drop adds nothing (the shader skips it), so that
- * is all the margin needed. */
+/** One square round every Mancha, outside which no Brochazo is looked at. Past ~2.5 radii a drop
+ * adds nothing (the shader skips it), so that is all the margin needed. */
 function cover(bounds: ReturnType<typeof place>[]) {
   const minX = Math.min(...bounds.map((b) => b.minX))
   const minZ = Math.min(...bounds.map((b) => b.minZ))
@@ -1122,14 +890,14 @@ function cover(bounds: ReturnType<typeof place>[]) {
 /** ?recorrido draws the way the Manada follows, coloured by month, for checking it by eye. */
 const SHOW_RECORRIDO = new URLSearchParams(window.location.search).has('recorrido')
 
-function RecorridoLine({ bake, hf }: { bake: FaunaBake; hf: Heightfield }) {
+function RecorridoLine({ bake }: { bake: FaunaBake }) {
   const { points, colors } = useMemo(() => {
     const pts = [...bake.recorrido, bake.recorrido[0]]
     return {
-      points: pts.map(([x, z]) => new THREE.Vector3(x, hf.heightAt(x, z) + 0.8, z)),
+      points: pts.map(([x, z]) => new THREE.Vector3(x, 1, z)),
       colors: pts.map((_, i) => new THREE.Color().setHSL(i / bake.recorrido.length, 0.9, 0.55)),
     }
-  }, [bake, hf])
+  }, [bake])
   return <Line points={points} vertexColors={colors} lineWidth={2.5} />
 }
 
@@ -1164,7 +932,6 @@ export function Fauna() {
   const ways = useMemo(() => waysOf(raw, hf.rivers), [raw, hf.rivers])
   const all = useMemo(() => drops(), [])
   const [bake] = ways
-  const geometry = useMemo(() => new THREE.PlaneGeometry(1, 1, GRID, GRID), [])
   const ground = useMemo(() => {
     const { nx, nz, data } = raw.ground
     const tex = new THREE.DataTexture(data, nx, nz, THREE.RGFormat)
@@ -1180,40 +947,33 @@ export function Fauna() {
     return () => ground.dispose()
   }, [ground, raw.ground])
 
-  const material = useMemo(
-    () =>
-      new THREE.ShaderMaterial({
-        vertexShader: vertex,
-        fragmentShader: fragment,
-        uniforms: { ...shared, ...uniforms },
-        transparent: true,
-        premultipliedAlpha: true,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
-      }),
-    [],
+  const cells = useMemo(() => new CellPass(stepFragment, { ...shared, ...uniforms }), [])
+  // Each frame paints from the last one's, so two passes take turns reading and drawing.
+  const paint = useMemo(() => {
+    const stroke = { value: 0 }
+    const a = new CellPass(paintFragment, { ...shared, uTaken: { value: cells.texture }, uPainted: { value: null }, uStroke: stroke })
+    const b = new CellPass(paintFragment, { ...shared, uTaken: { value: cells.texture }, uPainted: { value: a.texture }, uStroke: stroke })
+    a.uniforms.uPainted.value = b.texture
+    return { passes: [a, b], stroke, turn: 0 }
+  }, [cells])
+  useEffect(
+    () => () => {
+      cells.dispose()
+      paint.passes.forEach((p) => p.dispose())
+    },
+    [cells, paint],
   )
 
-  useEffect(() => () => geometry.dispose(), [geometry])
-  useEffect(() => () => material.dispose(), [material])
-
-  const glow = useMemo(() => new Glow(), [])
-  useEffect(() => () => glow.dispose(), [glow])
-
-  useFrame(({ gl }) => {
+  useFrame(({ gl }, dt) => {
     const month = useStore.getState().month
-    cover(ways.map((way, k) => place(way, hf, raw.ground, all, month + ESPECIES[k].ahead, month, k)))
-    glow.draw(gl)
-    uniforms.uGlow.value = glow.texture
+    cover(ways.map((way, k) => place(way, raw.ground, all, month + ESPECIES[k].ahead, month, k)))
+    cells.draw(gl)
+    paint.stroke.value = Math.min(dt, 0.1) / PAINT_SECONDS
+    paint.turn ^= 1
+    const pass = paint.passes[paint.turn]
+    pass.draw(gl)
+    mancha.uMancha.value = pass.texture
   })
 
-  return (
-    <>
-      <mesh geometry={geometry} material={material} frustumCulled={false} />
-      {SHOW_RECORRIDO && <RecorridoLine bake={bake} hf={hf} />}
-    </>
-  )
+  return SHOW_RECORRIDO ? <RecorridoLine bake={bake} /> : null
 }

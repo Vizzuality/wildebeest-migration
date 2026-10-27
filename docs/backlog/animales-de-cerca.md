@@ -2,6 +2,8 @@
 
 Status: needs-triage
 
+> El Mapa pasó a 2D, pintado con Brochazos: lo decidido aquí suponía animales dibujados en 3D y hay que repensarlo.
+
 ## Problema
 
 A escala de Mapa la Manada se ve como una Mancha. Al acercar la cámara podrían verse los animales sueltos por encima de ella. Los términos que siguen salieron del glosario cuando la Manada pasó a dibujarse como Mancha. Los Residentes (ver `residentes.md`) dependen de Muestra y Pastar.
