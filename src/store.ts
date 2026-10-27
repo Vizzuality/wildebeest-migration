@@ -31,9 +31,11 @@ export interface Paleta {
   especies: string[]
 }
 
-// Measured against the design's raster with the Mapa in August, the month it shows.
+// Measured against the design's raster with the Mapa in August, the month it shows, but for the
+// ground: the design's ran out to a cream next to the paper's, so the dry season barely showed. Dry
+// grass, thorn and bare ground fall between the 4th and 7th stops, which now run gold to ochre.
 export const PALETA: Paleta = {
-  suelo: ['#74af63', '#b8d170', '#dce082', '#e8e389', '#f5e79d', '#f7e7a3', '#f7e5a1', '#f7e49d', '#f6e194'],
+  suelo: ['#6aa85a', '#a9c862', '#cfd270', '#e3cf74', '#e5c167', '#deb05b', '#d49d52', '#d29a53', '#cd9150'],
   arboles: ['#31703c', '#428b4d', '#57994c', '#6ea651', '#93bb62', '#c4d276', '#d9db80', '#eae18b', '#f6e8a0'],
   agua: ['#327ac2', '#327ac3', '#377ec5', '#3f91e8', '#4293e9', '#4294e9', '#4394e9', '#4c97e8', '#76b5ed'],
   // Ñu, cebra (provisional until the design gives the zebras a colour of their own) and gacela.
