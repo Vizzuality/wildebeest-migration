@@ -31,15 +31,13 @@ export interface Paleta {
   especies: string[]
 }
 
-// Measured against the design's raster with the Mapa in August, the month it shows, but for the
-// ground: the design's ran out to a cream next to the paper's, so the dry season barely showed. Dry
-// grass, thorn and bare ground fall between the 4th and 7th stops, which now run gold to ochre.
+// The designer's, picked in the Tweaks.
 export const PALETA: Paleta = {
-  suelo: ['#6aa85a', '#a9c862', '#cfd270', '#e3cf74', '#e5c167', '#deb05b', '#d49d52', '#d29a53', '#cd9150'],
-  arboles: ['#31703c', '#428b4d', '#57994c', '#6ea651', '#93bb62', '#c4d276', '#d9db80', '#eae18b', '#f6e8a0'],
-  agua: ['#327ac2', '#327ac3', '#377ec5', '#3f91e8', '#4293e9', '#4294e9', '#4394e9', '#4c97e8', '#76b5ed'],
-  // Ñu, cebra (provisional until the design gives the zebras a colour of their own) and gacela.
-  especies: ['#7d3237', '#56606b', '#df7321'],
+  suelo: ['#8dac5d', '#9fb16d', '#afba75', '#c5c780', '#f6f1c5', '#e7ddb1', '#dbcda0', '#d2c194', '#c2ac7e'],
+  arboles: ['#264029', '#385535', '#4a6a40', '#5c7e4a', '#6c9255', '#80a563', '#9bb772', '#b4c981', '#c8d990'],
+  agua: ['#2f45ac', '#3650bc', '#3e5dd5', '#426fd8', '#4a7ae9', '#5f87db', '#7295dc', '#80a2dd', '#8faee7'],
+  // Ñu, cebra and gacela.
+  especies: ['#592224', '#e19393', '#c9584d'],
 }
 
 interface State {
