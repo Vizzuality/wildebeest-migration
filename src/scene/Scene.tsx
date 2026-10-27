@@ -13,7 +13,9 @@ import { Rivers } from './Rivers'
 /** Screen kept clear on the left for the panel (px), as wide as .panel in index.css. */
 const PANEL_PX = 553
 /** How much taller than the screen the Mapa is drawn, so it always runs off the top and bottom. */
-const OVERSCAN = 1.08
+const OVERSCAN = 1.2
+/** How far the Mapa's west edge tucks in under the panel (px). */
+const TUCK_PX = 80
 
 function Clock() {
   useFrame((_, dt) => {
@@ -36,7 +38,7 @@ const MID_Z = (MAP.minZ + MAP.maxZ) / 2
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
 /**
- * The Mapa straight from above with north up, against the panel and a little taller than the
+ * The Mapa straight from above with north up, tucked a little under the panel and a little taller than the
  * screen; whatever room is left on the right stays paper. The wheel zooms in about the cursor,
  * dragging pans, a double click puts it back.
  */
@@ -45,8 +47,8 @@ function Encuadre() {
   const gl = useThree((s) => s.gl)
   const { width, height } = useThree((s) => s.size)
   const fit = (height * OVERSCAN) / (MAP.maxZ - MAP.minZ)
-  // The spot at the screen's centre, putting the Mapa's west edge on the panel's.
-  const home = useCallback(() => ({ zoom: 1, x: MAP.minX + (width / 2 - PANEL_PX) / fit, z: MID_Z }), [width, fit])
+  // The spot at the screen's centre, putting the Mapa's west edge a little under the panel.
+  const home = useCallback(() => ({ zoom: 1, x: MAP.minX + (width / 2 - PANEL_PX + TUCK_PX) / fit, z: MID_Z }), [width, fit])
   const view = useRef(home())
 
   const frame = useCallback(() => {
