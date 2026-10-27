@@ -10,8 +10,10 @@ import { Fauna } from './Fauna'
 import { Border, Labels } from './Overlays'
 import { Rivers } from './Rivers'
 
-/** Screen kept clear at the bottom for the timeline (px). */
-const TIMELINE_PX = 88
+/** Screen kept clear on the left for the panel (px), as wide as .panel in index.css. */
+const PANEL_PX = 553
+/** How much taller than the screen the Mapa is drawn, so it always runs off the top and bottom. */
+const OVERSCAN = 1.08
 
 function Clock() {
   useFrame((_, dt) => {
@@ -29,43 +31,45 @@ function Clock() {
 
 /** How far in from the whole-Mapa framing the wheel can zoom. */
 const ZOOM_MAX = 20
-const MID_X = (MAP.minX + MAP.maxX) / 2
 const MID_Z = (MAP.minZ + MAP.maxZ) / 2
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
 /**
- * The Mapa straight from above with north up, fitted whole above the timeline; the wheel zooms in
- * about the cursor, dragging pans, a double click fits it whole again.
+ * The Mapa straight from above with north up, against the panel and a little taller than the
+ * screen; whatever room is left on the right stays paper. The wheel zooms in about the cursor,
+ * dragging pans, a double click puts it back.
  */
 function Encuadre() {
   const camera = useThree((s) => s.camera) as THREE.OrthographicCamera
   const gl = useThree((s) => s.gl)
   const { width, height } = useThree((s) => s.size)
-  const view = useRef({ zoom: 1, x: MID_X, z: MID_Z })
+  const fit = (height * OVERSCAN) / (MAP.maxZ - MAP.minZ)
+  // The spot at the screen's centre, putting the Mapa's west edge on the panel's.
+  const home = useCallback(() => ({ zoom: 1, x: MAP.minX + (width / 2 - PANEL_PX) / fit, z: MID_Z }), [width, fit])
+  const view = useRef(home())
 
   const frame = useCallback(() => {
-    const room = Math.max(1, height - TIMELINE_PX)
-    const fit = Math.min(width / (MAP.maxX - MAP.minX), room / (MAP.maxZ - MAP.minZ))
     const v = view.current
     camera.zoom = fit * v.zoom
-    // The Mapa never leaves the frame: its edge may come in as far as the frame's, no further.
-    const slackX = Math.max(0, (MAP.maxX - MAP.minX) / 2 - width / 2 / camera.zoom)
-    const slackZ = Math.max(0, (MAP.maxZ - MAP.minZ) / 2 - room / 2 / camera.zoom)
-    v.x = clamp(v.x, MID_X - slackX, MID_X + slackX)
-    v.z = clamp(v.z, MID_Z - slackZ, MID_Z + slackZ)
-    const z = v.z + TIMELINE_PX / 2 / camera.zoom
+    // Some of the Mapa always stays on screen.
+    const reachX = width / 2 / camera.zoom
+    const reachZ = height / 2 / camera.zoom
+    v.x = clamp(v.x, MAP.minX - reachX, MAP.maxX + reachX)
+    v.z = clamp(v.z, MAP.minZ - reachZ, MAP.maxZ + reachZ)
     camera.up.set(0, 0, -1)
-    camera.position.set(v.x, 100, z)
-    camera.lookAt(v.x, 0, z)
+    camera.position.set(v.x, 100, v.z)
+    camera.lookAt(v.x, 0, v.z)
     camera.updateProjectionMatrix()
-  }, [camera, width, height])
-  useLayoutEffect(frame, [frame])
+  }, [camera, width, height, fit])
+  useLayoutEffect(() => {
+    view.current = home()
+    frame()
+  }, [home, frame])
 
   useEffect(() => {
     // The labels sit over the canvas in their own layer, so the wheel is read on the parent.
     const el = gl.domElement.parentElement ?? gl.domElement
-    const room = Math.max(1, height - TIMELINE_PX)
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
       const v = view.current
@@ -75,7 +79,7 @@ function Encuadre() {
       const kmPerPx = 1 / (camera.zoom || 1)
       const gained = 1 - before / v.zoom
       v.x += (e.clientX - width / 2) * kmPerPx * gained
-      v.z += (e.clientY - room / 2) * kmPerPx * gained
+      v.z += (e.clientY - height / 2) * kmPerPx * gained
       frame()
     }
     let drag: { x: number; y: number } | null = null
@@ -95,7 +99,7 @@ function Encuadre() {
       drag = null
     }
     const onReset = () => {
-      view.current = { zoom: 1, x: MID_X, z: MID_Z }
+      view.current = home()
       frame()
     }
     el.addEventListener('wheel', onWheel, { passive: false })
@@ -110,7 +114,7 @@ function Encuadre() {
       window.removeEventListener('pointerup', onUp)
       el.removeEventListener('dblclick', onReset)
     }
-  }, [gl, camera, width, height, frame])
+  }, [gl, camera, width, height, frame, home])
   return null
 }
 

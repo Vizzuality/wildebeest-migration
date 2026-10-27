@@ -20,8 +20,8 @@ export const DESIGN_RASTER = { width: 923, height: 1024 }
 const WARP_PX = 9.5
 const CELL_PX = 3.6
 
-/** The paper wherever no paint lies: the page's own background, hsl(41 47% 93%). */
-export const DESIGN_PAPER = '#f6f0e5'
+/** The paper wherever no paint lies: the page's own background, --paper in index.css. */
+export const DESIGN_PAPER = '#f6f1e6'
 
 /**
  * Needs `uFiltros`, a 289×17 atlas of the image filters (exposure 0.1, contrast 0.33, saturation

@@ -3,7 +3,7 @@ import { Component, type ReactNode } from 'react'
 export function Curtain({ leaving = false }: { leaving?: boolean }) {
   return (
     <div className={`curtain${leaving ? ' leaving' : ''}`} aria-hidden={leaving}>
-      <p>Cargando relieve…</p>
+      <p>Loading relief…</p>
     </div>
   )
 }
@@ -19,8 +19,8 @@ export class TerrainErrorBoundary extends Component<{ children: ReactNode }, { f
     if (!this.state.failed) return this.props.children
     return (
       <div className="curtain" role="alert">
-        <p>No se ha podido cargar el relieve.</p>
-        <button onClick={() => this.setState({ failed: false })}>Reintentar</button>
+        <p>Could not load the relief.</p>
+        <button onClick={() => this.setState({ failed: false })}>Retry</button>
       </div>
     )
   }

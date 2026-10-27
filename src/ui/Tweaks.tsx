@@ -36,7 +36,7 @@ export function Tweaks() {
   }
 
   return (
-    <details className="tweaks" open>
+    <details className="tweaks">
       <summary>Tweaks</summary>
       <fieldset>
         <legend>Fuente</legend>

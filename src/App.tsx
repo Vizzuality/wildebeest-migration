@@ -6,7 +6,8 @@ import { Scene } from './scene/Scene'
 import { useStore } from './store'
 import { useHeightfield } from './terrain'
 import { Curtain, TerrainErrorBoundary } from './ui/Curtain'
-import { Timeline } from './ui/Timeline'
+import { Compass, Logo } from './ui/Chrome'
+import { Panel } from './ui/Panel'
 import { Tweaks } from './ui/Tweaks'
 
 function World() {
@@ -18,7 +19,9 @@ function World() {
       <Canvas className="canvas" dpr={[1, 2]} orthographic flat camera={{ near: 1, far: 200 }} gl={{ antialias: false }}>
         <Scene />
       </Canvas>
-      <Timeline />
+      <Panel />
+      <Logo />
+      <Compass />
       <Tweaks />
       <Curtain leaving />
     </>
