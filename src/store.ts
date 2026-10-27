@@ -16,8 +16,8 @@ export interface Trazo {
   direccion: number
 }
 
-// Largo 1.05 is longer than half the Brochazo spacing, so a row of them joins up.
-export const TRAZO: Trazo = { largo: 1.05, grosor: 1, escala: 1, giro: 1, direccion: 0 }
+// Strokes well past the Brochazo spacing, so rows of them run together into swathes.
+export const TRAZO: Trazo = { largo: 2, grosor: 1.5, escala: 1, giro: 1, direccion: 0 }
 
 /**
  * The colours the Brochazos are painted in, as sRGB hex. Each ramp runs as the Mapa's colours do in
