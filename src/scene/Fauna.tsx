@@ -226,10 +226,9 @@ function drops(): Drop[] {
  * the animals there, and is repainted in its colour.
  */
 export const ESPECIES = [
-  { name: 'ñu', count: 1.3, ahead: 0, color: '#7d3237' },
-  // Provisional until the design gives the zebras a colour of their own.
-  { name: 'cebra', count: 0.2, ahead: 0.025, color: '#56606b' },
-  { name: 'gacela', count: 0.35, ahead: 0, color: '#df7321' },
+  { name: 'ñu', count: 1.3, ahead: 0 },
+  { name: 'cebra', count: 0.2, ahead: 0.025 },
+  { name: 'gacela', count: 0.35, ahead: 0 },
 ] as const
 const HEAD_COUNT = ESPECIES.reduce((sum, e) => sum + e.count, 0)
 const SLOTS = DROPS * ESPECIES.length

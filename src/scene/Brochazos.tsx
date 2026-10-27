@@ -1,5 +1,5 @@
 import { useFrame } from '@react-three/fiber'
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { BRUMA_GLSL, brumaTexture } from '../bruma'
 import { MAP, project } from '../geo'
@@ -7,7 +7,7 @@ import { BROCHAZO_GLSL, CellPass } from '../shaders/brochazos'
 import { GLSL_COMMON, shared } from '../shaders/common'
 import { DESIGN_PAPER, DESIGN_RASTER } from '../shaders/figma'
 import { RIVER_GLSL, riverUniforms } from '../shaders/rivers'
-import { useStore } from '../store'
+import { type Paleta, useStore } from '../store'
 import { mipmapped, useHeightfield, type Heightfield } from '../terrain'
 import { ESPECIES, mancha } from './Fauna'
 import { Lienzo } from './Lienzo'
@@ -161,65 +161,66 @@ void main() {
 }
 `
 
-/** A run of the design's dots: where our colour falls along an axis, the design's colour and radius (km). */
-type Stop = [axis: number, color: string, km: number]
+/** A run of the design's dots: where our colour falls along an axis, and the design's radius (km). */
+type Stop = [axis: number, km: number]
 
 // Measured against the design's raster with the Mapa in August, the month it shows: each kind of
-// Brochazo was ranked along an axis of its colour, and every rank takes the colour and the paint
-// coverage the design has at the same rank among its own dots of that kind. The ground runs from
-// green to straw on red minus green (the Cultivo's red soil lands on straw, as in the design); trees
-// and water run on lightness.
+// Brochazo was ranked along an axis of its colour, and every rank takes the colour (the Paleta's, at
+// the stop's index) and the paint coverage the design has at the same rank among its own dots of
+// that kind. The ground runs from green to straw on red minus green (the Cultivo's red soil lands on
+// straw, as in the design); trees and water run on lightness.
 const RAMPS: Record<'ground' | 'tree' | 'water', Stop[]> = {
   ground: [
-    [-15.0, '#74af63', 0.73],
-    [1.0, '#b8d170', 0.65],
-    [8.0, '#dce082', 0.58],
-    [12.0, '#e8e389', 0.53],
-    [14.0, '#f5e79d', 0.47],
-    [16.0, '#f7e7a3', 0.46],
-    [19.0, '#f7e5a1', 0.52],
-    [39.0, '#f7e49d', 0.51],
-    [54.0, '#f6e194', 0.45],
+    [-15.0, 0.73],
+    [1.0, 0.65],
+    [8.0, 0.58],
+    [12.0, 0.53],
+    [14.0, 0.47],
+    [16.0, 0.46],
+    [19.0, 0.52],
+    [39.0, 0.51],
+    [54.0, 0.45],
   ],
   tree: [
-    [131.9, '#31703c', 0.62],
-    [145.8, '#428b4d', 0.63],
-    [159.5, '#57994c', 0.66],
-    [171.6, '#6ea651', 0.67],
-    [183.7, '#93bb62', 0.62],
-    [193.4, '#c4d276', 0.62],
-    [200.5, '#d9db80', 0.6],
-    [208.6, '#eae18b', 0.58],
-    [219.7, '#f6e8a0', 0.51],
+    [131.9, 0.62],
+    [145.8, 0.63],
+    [159.5, 0.66],
+    [171.6, 0.67],
+    [183.7, 0.62],
+    [193.4, 0.62],
+    [200.5, 0.6],
+    [208.6, 0.58],
+    [219.7, 0.51],
   ],
   water: [
-    [148.4, '#327ac2', 0.68],
-    [151.8, '#327ac3', 0.69],
-    [154.9, '#377ec5', 0.66],
-    [158.2, '#3f91e8', 0.68],
-    [163.5, '#4293e9', 0.64],
-    [168.7, '#4294e9', 0.67],
-    [171.8, '#4394e9', 0.68],
-    [175.2, '#4c97e8', 0.69],
-    [178.3, '#76b5ed', 0.66],
+    [148.4, 0.68],
+    [151.8, 0.69],
+    [154.9, 0.66],
+    [158.2, 0.68],
+    [163.5, 0.64],
+    [168.7, 0.67],
+    [171.8, 0.68],
+    [175.2, 0.69],
+    [178.3, 0.66],
   ],
 }
 
 /** GLSL taking a colour along a ramp, piece by piece. */
-function rampGlsl(name: string, axis: string, stops: Stop[]) {
+function rampGlsl(name: string, axis: string, stops: Stop[], colors: string) {
   const steps = stops
     .slice(1)
-    .map(([at, color, km], i) => {
+    .map(([at, km], i) => {
       const [from] = stops[i]
       const t = `clamp((v - ${from.toFixed(1)}) / ${(at - from).toFixed(1)}, 0.0, 1.0)`
-      return `  t = ${t};\n  col = mix(col, ${rgb(color)}, t);\n  r = mix(r, ${km.toFixed(3)}, t);`
+      return `  t = ${t};\n  col = mix(col, ${colors}[${i + 1}], t);\n  r = mix(r, ${km.toFixed(3)}, t);`
     })
     .join('\n')
-  return `void ${name}(vec3 c, out vec3 col, out float r) {
+  return `uniform vec3 ${colors}[${stops.length}];
+void ${name}(vec3 c, out vec3 col, out float r) {
   float v = ${axis};
   float t;
-  col = ${rgb(stops[0][1])};
-  r = ${stops[0][2].toFixed(3)};
+  col = ${colors}[0];
+  r = ${stops[0][1].toFixed(3)};
 ${steps}
 }`
 }
@@ -293,9 +294,9 @@ uniform sampler2D uVegetacion;
 uniform sampler2D uAgua;
 uniform sampler2D uMancha;
 
-${rampGlsl('groundDot', '(c.r - c.g) * 255.0', RAMPS.ground)}
-${rampGlsl('treeDot', 'dot(c, vec3(0.2126, 0.7152, 0.0722)) * 255.0', RAMPS.tree)}
-${rampGlsl('waterDot', 'dot(c, vec3(0.2126, 0.7152, 0.0722)) * 255.0', RAMPS.water)}
+${rampGlsl('groundDot', '(c.r - c.g) * 255.0', RAMPS.ground, 'uRampaSuelo')}
+${rampGlsl('treeDot', 'dot(c, vec3(0.2126, 0.7152, 0.0722)) * 255.0', RAMPS.tree, 'uRampaArboles')}
+${rampGlsl('waterDot', 'dot(c, vec3(0.2126, 0.7152, 0.0722)) * 255.0', RAMPS.water, 'uRampaAgua')}
 
 void main() {
   vec2 id = CELLS_MIN + floor(gl_FragCoord.xy);
@@ -323,7 +324,7 @@ void main() {
   // As far as the Mancha's brush has swept along it, the paint lies as thick as a tree's.
   vec4 m = cellOf(uMancha, id);
   float taken = clamp(m.g - m.r, 0.0, 1.0);
-  r = mix(r, max(r, ${RAMPS.tree[4][2].toFixed(3)}), taken);
+  r = mix(r, max(r, ${RAMPS.tree[4][1].toFixed(3)}), taken);
   full = mix(full, 1.0, taken);
   // Narrower than the design's dots on open ground, wider where the paint must cover it whole.
   r *= mix(0.7, 1.15, full);
@@ -438,7 +439,11 @@ function cropsTexture({ nx, nz, detail, cropsDetail }: Heightfield) {
 }
 
 
-const srgb = (hex: string) => new THREE.Vector3(...[1, 3, 5].map((k) => parseInt(hex.slice(k, k + 2), 16) / 255))
+/** Hex colours into uniform vectors, still in sRGB as the passes keep them. */
+function setColors(into: THREE.Vector3[], hexes: string[]) {
+  hexes.forEach((hex, i) => into[i].set(...([1, 3, 5].map((k) => parseInt(hex.slice(k, k + 2), 16) / 255) as [number, number, number])))
+}
+const colors = (n: number) => ({ value: Array.from({ length: n }, () => new THREE.Vector3()) })
 
 export function Brochazos() {
   const hf = useHeightfield()
@@ -465,12 +470,15 @@ export function Brochazos() {
       uSuelo: { value: suelo.texture },
       uVegetacion: { value: vegetacion.texture },
       uAgua: { value: agua.texture },
+      uRampaSuelo: colors(RAMPS.ground.length),
+      uRampaArboles: colors(RAMPS.tree.length),
+      uRampaAgua: colors(RAMPS.water.length),
     })
     const especie = new CellPass(especieFragment, {
       ...shared,
       ...mancha,
       uShore,
-      uEspecies: { value: ESPECIES.map((e) => srgb(e.color)) },
+      uEspecies: colors(ESPECIES.length),
     })
     const raster = new CellPass(
       lienzoFragment,
@@ -491,8 +499,18 @@ export function Brochazos() {
   }, [hf])
   useEffect(() => () => passes.forEach((p) => p.dispose()), [passes])
 
+  const laid = useRef<Paleta>(undefined)
   useFrame(({ gl }) => {
-    const { largo, grosor, escala, giro, direccion } = useStore.getState().trazo
+    const { trazo, paleta } = useStore.getState()
+    if (paleta !== laid.current) {
+      const [, , , pinta, especie] = passes
+      setColors(pinta.uniforms.uRampaSuelo.value, paleta.suelo)
+      setColors(pinta.uniforms.uRampaArboles.value, paleta.arboles)
+      setColors(pinta.uniforms.uRampaAgua.value, paleta.agua)
+      setColors(especie.uniforms.uEspecies.value, paleta.especies)
+      laid.current = paleta
+    }
+    const { largo, grosor, escala, giro, direccion } = trazo
     const u = passes[passes.length - 1].uniforms
     u.uLargo.value = largo
     u.uGrosor.value = grosor

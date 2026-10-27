@@ -1,4 +1,5 @@
-import { FUENTES, type Fuente, TRAZO, type Trazo, useStore } from '../store'
+import { useState } from 'react'
+import { FUENTES, type Fuente, PALETA, type Paleta, TRAZO, type Trazo, useStore } from '../store'
 
 const FUENTE_NAMES: Record<Fuente, string> = {
   datos: 'Datos',
@@ -14,10 +15,25 @@ const TRAZO_SLIDERS: { key: keyof Trazo; name: string; min: number; max: number;
   { key: 'direccion', name: 'Dirección', min: -90, max: 90, step: 1 },
 ]
 
+const RAMPAS: { key: keyof Paleta; name: string; from: string; to: string }[] = [
+  { key: 'suelo', name: 'Suelo', from: 'lluvias', to: 'secas' },
+  { key: 'arboles', name: 'Árboles', from: 'oscuro', to: 'claro' },
+  { key: 'agua', name: 'Agua', from: 'honda', to: 'clara' },
+  { key: 'especies', name: 'Especies', from: 'ñu', to: 'gacela' },
+]
+
 export function Tweaks() {
   const fuente = useStore((s) => s.fuente)
   const trazo = useStore((s) => s.trazo)
+  const paleta = useStore((s) => s.paleta)
   const set = useStore((s) => s.set)
+  const [copied, setCopied] = useState(false)
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(JSON.stringify(paleta, null, 2))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
 
   return (
     <details className="tweaks" open>
@@ -48,6 +64,35 @@ export function Tweaks() {
             </label>
           ))}
           <button onClick={() => set({ trazo: TRAZO })}>Restablecer</button>
+        </fieldset>
+      )}
+      {fuente === 'datos' && (
+        <fieldset className="sliders colores">
+          <legend>Colores</legend>
+          {RAMPAS.map(({ key, name, from, to }) => (
+            <div key={key} role="group" aria-label={name}>
+              <span>{name}</span>
+              <div className="ramp">
+                {paleta[key].map((hex, i) => (
+                  <input
+                    key={i}
+                    type="color"
+                    value={hex}
+                    title={hex}
+                    onChange={(e) => set({ paleta: { ...paleta, [key]: paleta[key].with(i, e.target.value) } })}
+                  />
+                ))}
+              </div>
+              <small>
+                <span>{from}</span>
+                <span>{to}</span>
+              </small>
+            </div>
+          ))}
+          <div className="actions">
+            <button onClick={copy}>{copied ? 'Copiado' : 'Copiar'}</button>
+            <button onClick={() => set({ paleta: PALETA })}>Restablecer</button>
+          </div>
         </fieldset>
       )}
     </details>
