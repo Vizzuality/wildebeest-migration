@@ -5,7 +5,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body, #root { margin: 0; height: 100%; overflow: hidden; background: #f5f0e3; }
+html, body, #root { margin: 0; height: 100%; overflow: hidden; background: hsl(41 47% 93%); }
 body { font-family: var(--sans); color: var(--ink); -webkit-font-smoothing: antialiased; }
 
 .canvas { position: fixed !important; inset: 0; }
@@ -39,3 +39,9 @@ body { font-family: var(--sans); color: var(--ink); -webkit-font-smoothing: anti
 .tweaks legend { margin-bottom: 6px; padding: 0; opacity: .6; }
 .tweaks button { padding: 5px 10px; border: 0; border-radius: 999px; background: rgba(251,243,230,.15); color: var(--ink); font: inherit; cursor: pointer; }
 .tweaks button[aria-pressed='true'] { background: #e0b25a; color: #1b1814; }
+.tweaks .sliders { flex-direction: column; gap: 6px; width: 220px; }
+.tweaks .sliders label { display: grid; grid-template-columns: 1fr 34px; gap: 2px 8px; align-items: center; }
+.tweaks .sliders span { grid-column: 1 / -1; opacity: .8; }
+.tweaks .sliders input { width: 100%; margin: 0; accent-color: #e0b25a; }
+.tweaks .sliders output { text-align: right; font-variant-numeric: tabular-nums; }
+.tweaks .sliders button { align-self: flex-start; margin-top: 4px; }

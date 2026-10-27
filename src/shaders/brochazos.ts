@@ -3,11 +3,10 @@ import { MAP } from '../geo'
 
 /**
  * Brochazos sit one per cell of a grid BROCHAZO_KM apart, nudged off its middle by up to JITTER of
- * the spacing so the rows don't read. At the usual framing a cell is about three pixels, the size
- * of the dabs in the design.
+ * the spacing: as far apart as the dots of the design's halftone, 5.3 of its raster pixels.
  */
-export const BROCHAZO_KM = 1.1
-const JITTER = 0.4
+export const BROCHAZO_KM = 1.72
+const JITTER = 0.25
 
 /** The first cell of the Mapa and how many cells it spans, for anything kept per Brochazo. */
 export const CELLS = {
@@ -23,16 +22,10 @@ const float BROCHAZO_KM = ${BROCHAZO_KM.toFixed(3)};
 const vec2 CELLS_MIN = vec2(${CELLS.minX.toFixed(1)}, ${CELLS.minZ.toFixed(1)});
 const vec2 CELLS_SIZE = vec2(${CELLS.nx.toFixed(1)}, ${CELLS.nz.toFixed(1)});
 
-// Where a Brochazo of the ground sits.
+// Where a Brochazo sits.
 vec2 brochazoAt(vec2 id) {
   vec2 nudge = (vec2(hash12(id), hash12(id + 71.3)) - 0.5) * ${(2 * JITTER).toFixed(2)};
   return (id + 0.5 + nudge) * BROCHAZO_KM;
-}
-
-// Where a Brochazo of the vegetation sits: a grid of its own, half a cell off the ground's.
-vec2 vegetacionAt(vec2 id) {
-  vec2 nudge = (vec2(hash12(id + 13.7), hash12(id + 29.9)) - 0.5) * ${(2 * JITTER).toFixed(2)};
-  return (id + 1.0 + nudge) * BROCHAZO_KM;
 }
 `
 
@@ -54,21 +47,34 @@ void main() {
 `
 
 /**
- * One texel per Brochazo of the Mapa, worked out afresh every frame from the moment of the year
- * alone. The fragment shader finds its Brochazo as `CELLS_MIN + floor(gl_FragCoord.xy)`.
+ * A picture worked out afresh every frame from the moment of the year alone, one texel per
+ * Brochazo unless told another size. Kept in half floats: the palette ramps read colours along
+ * steep axes, so 8-bit steps came out as visible jolts while the Verdor or the water changed. The fragment shader finds its Brochazo as
+ * `CELLS_MIN + floor(gl_FragCoord.xy)`.
  */
 export class CellPass {
-  private readonly target = new THREE.WebGLRenderTarget(CELLS.nx, CELLS.nz, {
-    minFilter: THREE.NearestFilter,
-    magFilter: THREE.NearestFilter,
-    depthBuffer: false,
-  })
+  private readonly target: THREE.WebGLRenderTarget
   private readonly material: THREE.ShaderMaterial
   readonly uniforms: Record<string, THREE.IUniform>
   private readonly quad: THREE.Mesh
   private readonly camera = new THREE.OrthographicCamera()
 
-  constructor(fragmentShader: string, uniforms: Record<string, THREE.IUniform>) {
+  constructor(fragmentShader: string, uniforms: Record<string, THREE.IUniform>, size?: { width: number; height: number }) {
+    this.target = size
+      ? // A raster to be looked at: pixel by pixel close up, averaged from afar.
+        new THREE.WebGLRenderTarget(size.width, size.height, {
+          minFilter: THREE.LinearMipmapLinearFilter,
+          magFilter: THREE.NearestFilter,
+          generateMipmaps: true,
+          type: THREE.HalfFloatType,
+          depthBuffer: false,
+        })
+      : new THREE.WebGLRenderTarget(CELLS.nx, CELLS.nz, {
+          minFilter: THREE.NearestFilter,
+          magFilter: THREE.NearestFilter,
+          type: THREE.HalfFloatType,
+          depthBuffer: false,
+        })
     this.uniforms = uniforms
     this.material = new THREE.ShaderMaterial({ vertexShader: cellVertex, fragmentShader: NO_DERIVATIVES + fragmentShader, uniforms })
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.material)
