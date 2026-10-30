@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { FUENTES, type Fuente, PALETA, type Paleta, TRAZO, type Trazo, useStore } from '../store'
+import { BARRO, type Barro, FUENTES, type Fuente, PALETA, type Paleta, TRAZO, type Trazo, useStore } from '../store'
 
 const FUENTE_NAMES: Record<Fuente, string> = {
   datos: 'Datos',
@@ -15,6 +15,10 @@ const TRAZO_SLIDERS: { key: keyof Trazo; name: string; min: number; max: number;
   { key: 'direccion', name: 'Dirección', min: -90, max: 90, step: 1 },
 ]
 
+const BARRO_SLIDERS: { key: keyof Barro; name: string; min: number; max: number; step: number }[] = [
+  { key: 'pegado', name: 'Pegado', min: 0, max: 0.6, step: 0.01 },
+]
+
 const RAMPAS: { key: keyof Paleta; name: string; from: string; to: string }[] = [
   { key: 'suelo', name: 'Suelo', from: 'lluvias', to: 'secas' },
   { key: 'arboles', name: 'Árboles', from: 'oscuro', to: 'claro' },
@@ -25,6 +29,7 @@ const RAMPAS: { key: keyof Paleta; name: string; from: string; to: string }[] = 
 export function Tweaks() {
   const fuente = useStore((s) => s.fuente)
   const trazo = useStore((s) => s.trazo)
+  const barro = useStore((s) => s.barro)
   const paleta = useStore((s) => s.paleta)
   const set = useStore((s) => s.set)
   const [copied, setCopied] = useState(false)
@@ -64,6 +69,26 @@ export function Tweaks() {
             </label>
           ))}
           <button onClick={() => set({ trazo: TRAZO })}>Restablecer</button>
+        </fieldset>
+      )}
+      {fuente === 'datos' && (
+        <fieldset className="sliders">
+          <legend>Mancha</legend>
+          {BARRO_SLIDERS.map(({ key, name, min, max, step }) => (
+            <label key={key}>
+              <span>{name}</span>
+              <input
+                type="range"
+                min={min}
+                max={max}
+                step={step}
+                value={barro[key]}
+                onChange={(e) => set({ barro: { ...barro, [key]: Number(e.target.value) } })}
+              />
+              <output>{barro[key]}</output>
+            </label>
+          ))}
+          <button onClick={() => set({ barro: BARRO })}>Restablecer</button>
         </fieldset>
       )}
       {fuente === 'datos' && (

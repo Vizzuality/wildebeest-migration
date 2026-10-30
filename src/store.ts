@@ -20,6 +20,16 @@ export interface Trazo {
 export const TRAZO: Trazo = { largo: 2, grosor: 1.5, escala: 1, giro: 1, direccion: 0 }
 
 /**
+ * How the Mancha moves like mud: how much more of it a Brochazo needs to be taken than to be kept
+ * (in the field the Mancha's edge sits at 0.9 of), so it sticks to the ground once it has it.
+ */
+export interface Barro {
+  pegado: number
+}
+
+export const BARRO: Barro = { pegado: 0.3 }
+
+/**
  * The colours the Brochazos are painted in, as sRGB hex. Each ramp runs as the Mapa's colours do in
  * the design: the ground from green in the rains to straw in the dry season, the trees from dark to
  * light, the water from deep to pale. The species are the Mancha's.
@@ -46,6 +56,7 @@ interface State {
   speed: number
   fuente: Fuente
   trazo: Trazo
+  barro: Barro
   paleta: Paleta
   set: (patch: Partial<Omit<State, 'set'>>) => void
 }
@@ -61,6 +72,7 @@ export const useStore = create<State>((set) => ({
   speed: 1,
   fuente: startFuente,
   trazo: TRAZO,
+  barro: BARRO,
   paleta: PALETA,
   set: (patch) => set(patch),
 }))

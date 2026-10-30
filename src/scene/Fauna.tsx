@@ -8,7 +8,7 @@ import { stageAt } from '../shaders/rivers'
 import { GLSL_COMMON, shared } from '../shaders/common'
 import { BROCHAZO_GLSL, CellPass } from '../shaders/brochazos'
 import { mulberry32, useHeightfield, type RiverLine } from '../terrain'
-import { useStore } from '../store'
+import { BARRO, MONTHS_PER_SECOND, useStore } from '../store'
 
 // The Manada as a liquid poured along the Recorrido. It is a chain of drops, each running a
 // little ahead of or behind the calendar, merged into one smooth surface like metaballs. On the
@@ -60,14 +60,15 @@ const WARP_MOVING_KM = 3.5
 const WARP_SCALE = 0.35
 /**
  * The Manada fills a stretch of the Recorrido, from its head CHAIN_HEAD months ahead of the
- * calendar to its tail CHAIN_TAIL behind, traced through CHAIN_POINTS points as one tube. On the
+ * calendar to its tail CHAIN_TAIL behind, traced through CHAIN_POINTS points as one tube, close
+ * enough that each stretch between two is shorter than it is wide and the rim doesn't bead. On the
  * move the stretch is as long as the pace makes it and bends with every turn of the way; standing
  * still its points fall on one spot and it pools. Each point is as wide as the Presencia across
  * the way there, times CHAIN_WIDTH, so it narrows where the way funnels to a crossing.
  */
 const CHAIN_HEAD = 0.12
 const CHAIN_TAIL = 0.45
-const CHAIN_POINTS = 13
+const CHAIN_POINTS = 49
 const CHAIN_WIDTH = 3
 /**
  * Pooled, the Presencia and the stretch of the way add up and the rim sits well out; streaming,
@@ -264,6 +265,11 @@ export const mancha = { uMancha: { value: null as THREE.Texture | null } }
 
 /** How long (s) the brush takes to sweep the Mancha's colour along a Brochazo, or the ground's back over it. */
 const PAINT_SECONDS = 0.6
+/**
+ * A change of month bigger than playback makes in a frame (dt is capped at 0.1 s) by more than
+ * this is a jump in the Timeline: the Mancha is laid afresh there, swept in all at once.
+ */
+const JUMP_MONTHS = 0.005
 
 const FIELD = /* glsl */ `
 ${GLSL_COMMON}
@@ -294,7 +300,7 @@ float thread(vec2 p, vec3 a, vec3 b, float r) {
 // How far p is from a tube from a to b that thins from ra to rb, in radii squared.
 float tube(vec2 p, vec2 a, vec2 b, float ra, float rb) {
   vec2 ab = b - a;
-  float k = clamp(dot(p - a, ab) / max(dot(ab, ab), ra * ra), 0.0, 1.0);
+  float k = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
   vec2 d = p - a - ab * k;
   float r2 = pow(mix(ra, rb, k), 2.0);
   return dot(d, d) / r2;
@@ -375,15 +381,20 @@ float fieldAt(vec2 world, inout float own[${ESPECIES.length}]) {
 `
 
 /**
- * Whether the Mancha has each Brochazo, from its field now, and which species takes it. Worked out
- * afresh every frame from the moment of the year alone, so scrubbing the Timeline lands on the same
- * Brochazos as playing up to it.
+ * Whether the Mancha has each Brochazo, from its field now, and which species takes it. Mud sticks:
+ * a Brochazo it already had (uPrev) is kept until the field falls uPegado short of what taking it
+ * needs, so a rim that sways back and forth doesn't let go and take it again. After a jump in the
+ * Timeline (uFresh) there is nothing to stick to, and it lands on the same Brochazos wherever it
+ * came from.
  */
 const stepFragment = /* glsl */ `
 ${FIELD}
 ${BROCHAZO_GLSL}
 uniform vec2 uOrigin;
 uniform float uSize;
+uniform sampler2D uPrev;
+uniform float uFresh;
+uniform float uPegado;
 void main() {
   vec2 id = CELLS_MIN + floor(gl_FragCoord.xy);
   vec2 at = brochazoAt(id);
@@ -396,8 +407,9 @@ void main() {
   float own[${ESPECIES.length}];
   for (int s = 0; s < ${ESPECIES.length}; s++) own[s] = 0.0;
   float field = fieldAt(at, own);
-  float on = (hash12(id + 5.3) - 0.5) * ${(2 * STAGGER).toFixed(2)};
-  if (field < ${EDGE.toFixed(2)} + on) {
+  float edge = ${EDGE.toFixed(2)} + (hash12(id + 5.3) - 0.5) * ${(2 * STAGGER).toFixed(2)};
+  bool had = uFresh < 0.5 && texelFetch(uPrev, ivec2(gl_FragCoord.xy), 0).r > 0.5;
+  if (field < (had ? edge - uPegado : edge)) {
     gl_FragColor = vec4(0.0);
     return;
   }
@@ -947,28 +959,44 @@ export function Fauna() {
     return () => ground.dispose()
   }, [ground, raw.ground])
 
-  const cells = useMemo(() => new CellPass(stepFragment, { ...shared, ...uniforms }), [])
+  // Each frame sticks to the last one's Brochazos, so two passes take turns reading and drawing.
+  const cells = useMemo(() => {
+    const step = { ...shared, ...uniforms, uFresh: { value: 1 }, uPegado: { value: BARRO.pegado } }
+    const a = new CellPass(stepFragment, { ...step, uPrev: { value: null } })
+    const b = new CellPass(stepFragment, { ...step, uPrev: { value: a.texture } })
+    a.uniforms.uPrev.value = b.texture
+    return { passes: [a, b], fresh: step.uFresh, pegado: step.uPegado, turn: 0, month: NaN }
+  }, [])
   // Each frame paints from the last one's, so two passes take turns reading and drawing.
   const paint = useMemo(() => {
     const stroke = { value: 0 }
-    const a = new CellPass(paintFragment, { ...shared, uTaken: { value: cells.texture }, uPainted: { value: null }, uStroke: stroke })
-    const b = new CellPass(paintFragment, { ...shared, uTaken: { value: cells.texture }, uPainted: { value: a.texture }, uStroke: stroke })
+    const taken = { value: cells.passes[0].texture }
+    const a = new CellPass(paintFragment, { ...shared, uTaken: taken, uPainted: { value: null }, uStroke: stroke })
+    const b = new CellPass(paintFragment, { ...shared, uTaken: taken, uPainted: { value: a.texture }, uStroke: stroke })
     a.uniforms.uPainted.value = b.texture
-    return { passes: [a, b], stroke, turn: 0 }
+    return { passes: [a, b], stroke, taken, turn: 0 }
   }, [cells])
   useEffect(
     () => () => {
-      cells.dispose()
+      cells.passes.forEach((p) => p.dispose())
       paint.passes.forEach((p) => p.dispose())
     },
     [cells, paint],
   )
 
   useFrame(({ gl }, dt) => {
-    const month = useStore.getState().month
+    const { month, playing, speed, barro } = useStore.getState()
+    const moved = Math.abs(((month - cells.month + 18) % 12) - 6)
+    const jump = !(moved <= (playing ? 0.1 * MONTHS_PER_SECOND * speed : 0) + JUMP_MONTHS)
+    cells.month = month
     cover(ways.map((way, k) => place(way, raw.ground, all, month + ESPECIES[k].ahead, month, k)))
-    cells.draw(gl)
-    paint.stroke.value = Math.min(dt, 0.1) / PAINT_SECONDS
+    cells.fresh.value = jump ? 1 : 0
+    cells.pegado.value = barro.pegado
+    cells.turn ^= 1
+    const step = cells.passes[cells.turn]
+    step.draw(gl)
+    paint.taken.value = step.texture
+    paint.stroke.value = jump ? 1 : Math.min(dt, 0.1) / PAINT_SECONDS
     paint.turn ^= 1
     const pass = paint.passes[paint.turn]
     pass.draw(gl)
